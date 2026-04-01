@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-csr-approver
+  namespace: ${ARGOCD_NAMESPACE}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: cluster-services
+  destination:
+    namespace: kube-system
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      - CreateNamespace=false
+    retry:
+      limit: 10
+      backoff:
+        duration: 20s
+        factor: 2
+        maxDuration: 10m
+  sources:
+    # https://artifacthub.io/packages/helm/kubelet-csr-approver/kubelet-csr-approver
+    - chart: kubelet-csr-approver
+      repoURL: https://postfinance.github.io/kubelet-csr-approver
+      targetRevision: ${CSR_APPROVER_HELM_VERSION}
+      helm:
+        releaseName: kube-csr-approver
+        valueFiles:
+          - $values/rendered/${OVERLAY_NAME}/kube-csr-approver/csrApproverHelmValues.yaml
+    - repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
+      targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
+      ref: values
