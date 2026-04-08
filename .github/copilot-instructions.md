@@ -691,7 +691,7 @@ When you are assigned to an issue the `ai-working` label is added automatically.
 
 ### Before Writing Any Code
 
-1. **Read the issue carefully.** Identify every explicit requirement and any implicit constraints.
+1. **Read the issue carefully.** Identify every explicit requirement and any implicit constraints (e.g. "don't break existing clusters").
 2. **Post a planning comment first.** Before writing any code, post a comment on the issue that outlines:
    - Your understanding of the problem
    - The files you plan to change and why
@@ -699,8 +699,7 @@ When you are assigned to an issue the `ai-working` label is added automatically.
    - Any questions or ambiguities you need resolved
    Wait for at least one response/approval before proceeding. Do not guess on ambiguous requirements.
 3. **Iterate with comments.** For larger tasks, post progress comments at key decision points (e.g. after choosing an approach, before implementing a complex change). This is the equivalent of "planning mode" in editors.
-4. If possible without adding a lot of complexity, avoid breaking existing clusters. Breaking existing clusters/deployments can be acceptable, if **stated very clearly** and **explained why** this is needed
-
+4. If possible without adding a lot of complexity, avoid breaking existing clusters. Breaking existing clusters/deployments can be acceptable, if **stated very clearly** and **explained why** this is needed.
 
 ### Making Changes
 
@@ -784,8 +783,3 @@ Check the output to confirm the security settings from the [Security Best Practi
 - **Description**: explain *what* changed, *why*, and list every file modified.
 - **One concern per PR.** If an issue covers multiple unrelated concerns, raise separate PRs or ask the requester how to proceed.
 - **Do not self-merge.** Always request a human review.
-
-
-
-curl -LO https://factory.talos.dev/image/ee21ef4a5ef808a9b7484cc0dda0f25075021691c8c09a276591eedb638ea1f9/v1.9.5/metal-arm64.raw.xz
-  xz -d metal-arm64.raw.xz

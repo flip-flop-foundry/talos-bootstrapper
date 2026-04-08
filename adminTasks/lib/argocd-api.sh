@@ -190,6 +190,7 @@ refresh_all_argocd_apps() {
     local total_count=0
     local batch=()
     local pids=()
+    typeset -A pid_to_app
     
     # Collect app names into an array
     local app_list=()
@@ -207,16 +208,21 @@ refresh_all_argocd_apps() {
         # When batch is full or we've reached the last app, process the batch
         if (( ${#batch[@]} == batch_size || i == total_count - 1 )); then
             pids=()
+            pid_to_app=()
             
             for app_name in "${batch[@]}"; do
                 refresh_argocd_app "$app_name" &
-                pids+=($!)
+                local pid=$!
+                pids+=($pid)
+                pid_to_app[$pid]="$app_name"
             done
             
             # Wait for all jobs in this batch and count successes
             for pid in "${pids[@]}"; do
                 if wait "$pid"; then
                     success_count=$((success_count + 1))
+                else
+                    log_error "Refresh failed for application: ${pid_to_app[$pid]}"
                 fi
             done
             
@@ -226,6 +232,12 @@ refresh_all_argocd_apps() {
     
     # Logout
     argocd_logout_in_pod
+    
+    local failed_count=$(( total_count - success_count ))
+    if (( failed_count > 0 )); then
+        log_error "Refresh failed for $failed_count out of $total_count ArgoCD application(s)"
+        return 1
+    fi
     
     log_success "Refreshed $success_count out of $total_count ArgoCD application(s)"
     return 0

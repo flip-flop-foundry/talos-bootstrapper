@@ -4,11 +4,14 @@ set -euo pipefail
 env_file="${1:?env file path is required}"
 workspace_dir="${2:-$(pwd)}"
 
+# Resolve env_file to an absolute path so it works regardless of how it was passed
+[[ "$env_file" = /* ]] || env_file="$workspace_dir/$env_file"
+
 overlay_dir=$(dirname "$env_file")
 active_dir="$workspace_dir/.vscode/current"
 
 mkdir -p "$active_dir"
-ln -sfn "$workspace_dir/$overlay_dir/talos/talosconfig" "$active_dir/talosconfig"
+ln -sfn "$overlay_dir/talos/talosconfig" "$active_dir/talosconfig"
 
 first_node=$(yq -r '.contexts[].nodes[0]' "$active_dir/talosconfig" | head -n1)
 if [ -z "$first_node" ] || [ "$first_node" = "null" ]; then

@@ -117,7 +117,7 @@ spec:
 
           # Set by LONGHORN_DISK_DISCOVERY_DRY_RUN in the overlay env — when true,
           # all kubectl patch calls are skipped and the proposed config is printed instead.
-          DRY_RUN=${LONGHORN_DISK_DISCOVERY_DRY_RUN}
+          DRY_RUN=${LONGHORN_DISK_DISCOVERY_DRY_RUN:-false}
           
           echo "========================================="
           echo "Longhorn Auto-Discover Disks Job"
@@ -125,7 +125,7 @@ spec:
           
           # Install required tools
           echo "Installing jq..."
-          apk add --no-cache jq wget >/dev/null 2>&1
+          apk add --no-cache jq wget diffutils >/dev/null 2>&1
           
           # Detect architecture
           ARCH=$(uname -m)
@@ -392,8 +392,7 @@ spec:
                     # Write to temp files so diff can compare them
                     echo "$CURRENT_JSON" > /tmp/disk_current.json
                     echo "$PROPOSED_JSON" > /tmp/disk_proposed.json
-                    diff -u /tmp/disk_current.json /tmp/disk_proposed.json \
-                      --label 'current' --label 'proposed' || true
+                    diff -u /tmp/disk_current.json /tmp/disk_proposed.json || true
                     rm -f /tmp/disk_current.json /tmp/disk_proposed.json
                   fi
                   PROCESSED_NODES="${PROCESSED_NODES} ${NODE}"
