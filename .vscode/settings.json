@@ -1,0 +1,12 @@
+{
+    "terminal.integrated.env.osx": {
+        "TALOSCONFIG": "${workspaceFolder}/.vscode/current/talosconfig",
+        "KUBECONFIG": "${workspaceFolder}/.vscode/current/kubeconfig"
+    },
+    "chat.tools.terminal.autoApprove": {
+        "/^bash -n adminTasks/lib/image-factory\\.sh adminTasks/pxe-setup\\.sh adminTasks/cluster-initialSetup\\.sh$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

@@ -29,7 +29,7 @@ cd "$GIT_SOURCE_DIR" || {
 }
 
 echo "Staging all changes..."
-git add -A -f
+git add -A -f -- . ':(exclude)adminTasks/pxe/assets/**' ':(exclude).vscode/current/**'
 
 
 # Ensure branch does not already exist

@@ -84,10 +84,9 @@ metadata:
   name: longhorn-auto-discover-disks
   namespace: longhorn-system
   annotations:
-    # argocd.argoproj.io/hook: PreSync
-    # argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
     # argocd.argoproj.io/sync-wave: "-1"
-    # argocd.argoproj.io/compare-result: ignore
 spec:
   template:
     spec:
@@ -115,6 +114,10 @@ spec:
         - |
           #!/bin/sh
           set -e
+
+          # Set by LONGHORN_DISK_DISCOVERY_DRY_RUN in the overlay env — when true,
+          # all kubectl patch calls are skipped and the proposed config is printed instead.
+          DRY_RUN=${LONGHORN_DISK_DISCOVERY_DRY_RUN:-false}
           
           echo "========================================="
           echo "Longhorn Auto-Discover Disks Job"
@@ -122,16 +125,26 @@ spec:
           
           # Install required tools
           echo "Installing jq..."
-          apk add --no-cache jq wget >/dev/null 2>&1
+          apk add --no-cache jq wget diffutils >/dev/null 2>&1
+          
+          # Detect architecture
+          ARCH=$(uname -m)
+          case "$ARCH" in
+            x86_64)  ARCH="amd64" ;;
+            aarch64) ARCH="arm64" ;;
+            armv7l)  ARCH="arm" ;;
+            *) echo "ERROR: Unsupported architecture: $ARCH"; exit 1 ;;
+          esac
+          echo "Detected architecture: $ARCH"
           
           # Download kubectl
           echo "Downloading kubectl v$KUBERNETES_VERSION..."
-          wget -q -O /tmp/kubectl "https://dl.k8s.io/release/v$KUBERNETES_VERSION/bin/linux/amd64/kubectl"
+          wget -q -O /tmp/kubectl "https://dl.k8s.io/release/v$KUBERNETES_VERSION/bin/linux/$ARCH/kubectl"
           chmod +x /tmp/kubectl
           
           # Download talosctl
           echo "Downloading talosctl $TALOS_VERSION..."
-          wget -q -O /tmp/talosctl "https://github.com/siderolabs/talos/releases/download/$TALOS_VERSION/talosctl-linux-amd64"
+          wget -q -O /tmp/talosctl "https://github.com/siderolabs/talos/releases/download/$TALOS_VERSION/talosctl-linux-$ARCH"
           chmod +x /tmp/talosctl
           
           export PATH="/tmp:$PATH"
@@ -209,13 +222,21 @@ spec:
               # Tag Longhorn node with role (preserve existing tags)
               EXISTING_TAGS=$(kubectl get node.longhorn.io "$NODE" -n longhorn-system -o jsonpath='{.spec.tags}' 2>/dev/null || echo "[]")
               if ! echo "$EXISTING_TAGS" | grep -q "\"$NODE_ROLE\""; then
-                echo "Adding node role tag: $NODE_ROLE"
                 NEW_TAGS=$(echo "$EXISTING_TAGS" | jq -r ". + [\"$NODE_ROLE\"] | unique")
-                kubectl patch node.longhorn.io "$NODE" -n longhorn-system --type=merge -p "{\"spec\":{\"tags\":$NEW_TAGS}}" || {
-                  echo "ERROR: Failed to tag Longhorn node"
-                  FAILED_NODES="${FAILED_NODES} ${NODE}"
-                  continue
-                }
+                if [ "$DRY_RUN" = "true" ]; then
+                  echo "  [DRY RUN] Node tags WOULD CHANGE: $EXISTING_TAGS → $NEW_TAGS"
+                else
+                  echo "Adding node role tag: $NODE_ROLE"
+                  kubectl patch node.longhorn.io "$NODE" -n longhorn-system --type=merge -p "{\"spec\":{\"tags\":$NEW_TAGS}}" || {
+                    echo "ERROR: Failed to tag Longhorn node"
+                    FAILED_NODES="${FAILED_NODES} ${NODE}"
+                    continue
+                  }
+                fi
+              else
+                if [ "$DRY_RUN" = "true" ]; then
+                  echo "  [DRY RUN] Node tag '$NODE_ROLE' already present — no change needed"
+                fi
               fi
               
               # Get existing disks from Longhorn
@@ -360,13 +381,30 @@ spec:
               
               # Apply configuration
               if [ "$FINAL_DISKS" != "{}" ] && [ "$FINAL_DISKS" != "null" ]; then
-                echo "Applying disk configuration to Longhorn node..."
-                if kubectl patch node.longhorn.io "$NODE" -n longhorn-system --type=merge -p "{\"spec\":{\"disks\":$FINAL_DISKS}}"; then
-                  echo "SUCCESS: Node $NODE configured with $(echo "$FINAL_DISKS" | jq 'length') disk(s)"
+                if [ "$DRY_RUN" = "true" ]; then
+                  # Normalise both sides to sorted, indented JSON for a clean diff
+                  CURRENT_JSON=$(echo "$EXISTING_DISKS" | jq -S .)
+                  PROPOSED_JSON=$(echo "$FINAL_DISKS" | jq -S .)
+                  if [ "$CURRENT_JSON" = "$PROPOSED_JSON" ]; then
+                    echo "[DRY RUN] Disk config for $NODE — NO CHANGE (already matches discovered layout)"
+                  else
+                    echo "[DRY RUN] Disk config for $NODE — CHANGES DETECTED:"
+                    # Write to temp files so diff can compare them
+                    echo "$CURRENT_JSON" > /tmp/disk_current.json
+                    echo "$PROPOSED_JSON" > /tmp/disk_proposed.json
+                    diff -u /tmp/disk_current.json /tmp/disk_proposed.json || true
+                    rm -f /tmp/disk_current.json /tmp/disk_proposed.json
+                  fi
                   PROCESSED_NODES="${PROCESSED_NODES} ${NODE}"
                 else
-                  echo "ERROR: Failed to patch Longhorn node $NODE"
-                  FAILED_NODES="${FAILED_NODES} ${NODE}"
+                  echo "Applying disk configuration to Longhorn node..."
+                  if kubectl patch node.longhorn.io "$NODE" -n longhorn-system --type=merge -p "{\"spec\":{\"disks\":$FINAL_DISKS}}"; then
+                    echo "SUCCESS: Node $NODE configured with $(echo "$FINAL_DISKS" | jq 'length') disk(s)"
+                    PROCESSED_NODES="${PROCESSED_NODES} ${NODE}"
+                  else
+                    echo "ERROR: Failed to patch Longhorn node $NODE"
+                    FAILED_NODES="${FAILED_NODES} ${NODE}"
+                  fi
                 fi
               else
                 echo "WARNING: No disks to configure for node $NODE"

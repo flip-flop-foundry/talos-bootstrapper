@@ -20,8 +20,8 @@ spegel:
   containerdRegistryConfigPath: "/etc/cri/conf.d/hosts"
 
 
-  resolveTags: true
-  logLevel: "INFO"
+  resolveTags: false
+  logLevel: "INFO" #INFO, DEBUG, ERROR
   # -- When true enables debug web page.
   debugWebEnabled: false
 

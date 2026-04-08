@@ -9,6 +9,9 @@ kubeProxyReplacement: true
 # Allow Cilium to run on controlplane nodes
 tolerations:
   - operator: Exists
+  - key: nidhogg.uswitch.com/spegel.spegel
+    operator: Exists
+    effect: NoSchedule
   
 securityContext:
   capabilities:
@@ -64,6 +67,30 @@ ingressController:
 
 #Needed or else ArgoCD will show resources as OutOfSync permanently
 hubble:
+  ui:
+    enabled: true
+    tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+    ingress:
+      enabled: true
+      className: traefik
+      hosts:
+        - hubble.${CLUSTER_EXTERNAL_DOMAIN}
+      tls:
+        - secretName: hubble-ui-tls
+          hosts:
+            - hubble.${CLUSTER_EXTERNAL_DOMAIN}
+      annotations:
+        cert-manager.io/cluster-issuer: ${TALOS_CLUSTER_NAME}-ca-issuer
+        traefik.ingress.kubernetes.io/router.middlewares: kube-system-hubble-ui-auth@kubernetescrd
+  relay:
+    enabled: true
+    tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
   tls: #https://docs.cilium.io/en/latest/observability/hubble/configuration/tls/
     auto: # https://docs.cilium.io/en/latest/configuration/argocd-issues/#argo-cd-show-resources-permanently-out-of-sync
       enabled: true

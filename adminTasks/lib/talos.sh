@@ -11,17 +11,40 @@
 # ============================================================================
 
 # Generate per-node Talos machine config from a base template.
-# Copies base config, detects disks, sets HostnameConfig + certSANs, appends manifests.
-# Usage: generate_node_config <node_fqdn> <base_yaml> <output_file> [append_manifests...]
+# Copies base config, applies per-node overlay patch (if exists), detects disks,
+# sets HostnameConfig + certSANs, appends manifests.
+# Usage: generate_node_config <node_fqdn> <base_yaml> <output_file> <overlay_dir> [append_manifests...]
 generate_node_config() {
   local node="$1"
   local base_yaml="$2"
   local config_file="$3"
-  shift 3
+  local overlay_dir="$4"
+  shift 4
   local append_manifests=("$@")
 
   log_info "  Creating config for node $node -> $config_file"
   cp "$base_yaml" "$config_file"
+
+  # Apply per-node patch if it exists (merges into first YAML document only)
+  local node_hostname
+  node_hostname=$(echo "$node" | cut -d'.' -f1)
+  local node_patch="$overlay_dir/talos/nodes/${node_hostname}.yaml"
+  if [[ -f "$node_patch" ]]; then
+    log_info "  Applying per-node patch: $node_patch"
+    local tmp_main tmp_rest tmp_merged
+    tmp_main=$(mktemp)
+    tmp_rest=$(mktemp)
+    tmp_merged=$(mktemp)
+    yq 'select(di == 0)' "$config_file" > "$tmp_main"
+    yq 'select(di > 0)' "$config_file" > "$tmp_rest"
+    yq eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' "$tmp_main" "$node_patch" > "$tmp_merged"
+    cat "$tmp_merged" > "$config_file"
+    if [[ -s "$tmp_rest" ]]; then
+      echo "---" >> "$config_file"
+      cat "$tmp_rest" >> "$config_file"
+    fi
+    rm -f "$tmp_main" "$tmp_rest" "$tmp_merged"
+  fi
 
   # Disk detection
   log_info "  Detecting disks on node $node..."
@@ -98,17 +121,24 @@ reset_talos_node() {
 }
 
 # Apply Talos config to a node. Auto-detects whether --insecure is needed.
-# Usage: apply_talos_config <node_fqdn> <config_file>
+# If dry_run is "true", uses --dry-run to show what would change without applying.
+# Usage: apply_talos_config <node_fqdn> <config_file> [dry_run]
 apply_talos_config() {
   local node="$1"
   local config_file="$2"
+  local dry_run="${3:-false}"
 
   local insecure=""
   if ! talosctl get members --nodes "$node" &>/dev/null; then
     insecure=" --insecure"
   fi
 
-  talosctl apply-config${insecure} --nodes "$node" --file "$config_file"
+  if [[ "$dry_run" == "true" ]]; then
+    log_info "  [DRY RUN] Showing diff for $node (no changes will be applied)"
+    talosctl apply-config${insecure} --nodes "$node" --file "$config_file" --dry-run
+  else
+    talosctl apply-config${insecure} --nodes "$node" --file "$config_file"
+  fi
 }
 
 # Wait for a Talos node to reach "booting" or "running" state.

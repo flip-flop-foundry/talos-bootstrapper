@@ -268,9 +268,29 @@ approve_node_csrs() {
             done <<< "$pending_csrs"
         fi
         
+        # Re-check if expected nodes became Ready while loop is running
+        if [[ ${#expected_hostnames[@]} -gt 0 ]]; then
+            local still_expected=()
+
+            for expected_hostname in "${expected_hostnames[@]}"; do
+                if kubectl get node "$expected_hostname" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null | grep -q "True"; then
+                    log_info "Skipping node $expected_hostname (already Ready)"
+                    continue
+                fi
+
+                still_expected+=("$expected_hostname")
+            done
+
+            if [[ ${#still_expected[@]} -eq 0 ]]; then
+                expected_hostnames=()
+            else
+                expected_hostnames=("${still_expected[@]}")
+            fi
+        fi
+        
         # Check if all expected nodes have been approved
         if [[ ${#expected_hostnames[@]} -eq 0 ]]; then
-            log_success "All expected nodes have approved CSRs! Total approved: ${#approved_csrs[@]}"
+            log_success "All expected nodes are ready or have approved CSRs! Total approved: ${#approved_csrs[@]}"
             return 0
         fi
         

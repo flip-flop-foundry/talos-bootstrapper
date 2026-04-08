@@ -52,6 +52,43 @@ Check the `storage-classes.yaml` file for the full list.
 
 Backup targets (S3, NFS, etc.) are configured via `LONGHORN_BACKUP_TARGET` in the overlay `.env` file. Credentials are stored in a Kubernetes `Secret` (`defaultBackupTargetCredentials.yaml`).
 
-### Disk auto-discovery
+### Disk configuration — two-stage process
 
-The `autoDiscoverDisksJob.yaml` Kubernetes `Job` runs on each worker node during bootstrap to discover and configure available disks for Longhorn. Disks are identified based on the `LONGHORN_DISK_*` variables in the overlay `.env` file.
+Disk handling is split across two systems that work together:
+
+**Stage 1 — Talos machine config (at node provisioning time)**
+
+`cluster-initialSetup.sh` calls `detect_node_disks` (via `lib/disk-detection.sh`) for each node. It queries `talosctl get mounts` to identify the system disk and `talosctl get disks` to find additional disks. For each extra disk it appends a `UserVolumeConfig` document to the node's machine config YAML:
+
+```yaml
+apiVersion: v1alpha1
+kind: UserVolumeConfig
+name: disk1Ssd
+provisioning:
+  diskSelector:
+    match: disk.dev_path == "/dev/sdb" && disk.rotational == false
+  grow: true
+  minSize: 10GB
+```
+
+Talos reads this at boot and formats and mounts the disk at `/var/mnt/disk1Ssd`.
+
+**Stage 2 — Longhorn node config (at runtime, on every ArgoCD sync)**
+
+The `autoDiscoverDisksJob.yaml` Job runs as an ArgoCD sync hook (`BeforeHookCreation` ensures the previous Job is deleted first). It runs an Alpine container that:
+
+1. Waits for Longhorn nodes to reach Ready state
+2. For each node, queries `talosctl get mounts` to find `/var/lib/longhorn` (root disk) and all `/var/mnt/*` mounts (the UserVolumes from Stage 1)
+3. Detects whether each disk is SSD or HDD via the Talos API
+4. Tags the Longhorn node as `controlplane` or `workernode`
+5. Patches `node.longhorn.io` with the discovered disk paths and tags — preserving any existing manual configuration
+
+The two stages connect like this:
+```
+Talos UserVolumeConfig → formats /dev/sdb → mounts at /var/mnt/disk1Ssd
+                                                         ↓
+Longhorn Job → sees /var/mnt/disk1Ssd in talosctl get mounts
+             → patches Longhorn node to use /var/mnt/disk1Ssd as a storage disk
+```
+
+Set `LONGHORN_IGNORE_USB_DISKS=true` in the overlay `.env` to exclude USB-attached disks from both stages.

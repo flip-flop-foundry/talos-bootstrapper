@@ -17,6 +17,7 @@ overlays/                # Cluster-specific .env files + optional YAML overrides
   <cluster>/
     <cluster>.env        # All cluster config: versions, CIDRs, domains, node lists
     talos/               # Generated Talos machine configs + secrets
+      nodes/             # Optional per-node YAML patches (merged by hostname)
 rendered/                # OUTPUT (gitignored) — final manifests after envsubst + yq merge
 adminTasks/              # Bootstrap and rendering scripts
   lib/                   # Shared shell libraries (logging, k8s helpers, API clients)
@@ -239,6 +240,37 @@ pxe/
 4. Create `overlays/<cluster>/talos/` with generated machine configs
 5. Run `./adminTasks/render-overlay.sh overlays/<cluster>/<cluster>.env`
 6. Run `./adminTasks/cluster-bootstrap.sh overlays/<cluster>/<cluster>.env`
+
+## Per-Node Talos Patches
+
+Individual nodes can be customised by placing a YAML patch file at:
+
+```
+overlays/<cluster>/talos/nodes/<hostname>.yaml
+```
+
+The hostname is the short name (first label of the FQDN, e.g. `brew-10` for `brew-10.example.com`).
+
+These patches are deep-merged (patch wins) into the generated machine config during `cluster-initialSetup.sh`, after all role-level patches (base + overlay + controlplane/worker) have been applied. Only the first YAML document (the main machine config) is merged — additional documents (HostnameConfig, disk configs, etc.) are preserved unchanged.
+
+### Patch Precedence (lowest to highest)
+
+1. Talos built-in defaults (`talosctl gen config`)
+2. `base/talos/talosPatchConfig.yaml` — common to all nodes
+3. `overlays/<cluster>/talos/talosPatchConfig.yaml` — cluster override (wins over #2)
+4. `base/talos/talosPatchConfigControlplane.yaml` — controlplane-only (or worker equivalent)
+5. `overlays/<cluster>/talos/talosPatchConfigControlplane.yaml` — cluster override (wins over #4)
+6. Per-node customisation (disk detection, hostname, certSANs)
+7. **`overlays/<cluster>/talos/nodes/<hostname>.yaml`** — per-node patch (**wins over all above**)
+
+### Example — Disable hugepages on Raspberry Pi nodes
+
+```yaml
+# overlays/tuborgnetes/talos/nodes/brew-10.yaml
+machine:
+  sysctls:
+    vm.nr_hugepages: "0"
+```
 
 ## How to Add a New Component
 

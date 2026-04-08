@@ -94,6 +94,14 @@ log_info "Manual ISO download (for nodes that can't PXE boot):"
 log_info "  ${FACTORY_BASE_URL}/image/${SCHEMATIC_ID}/${TALOS_INSTALL_VERSION}/metal-amd64.iso"
 log_info "  ${FACTORY_BASE_URL}/image/${SCHEMATIC_ID}/${TALOS_INSTALL_VERSION}/metal-amd64-secureboot.iso"
 
+RPI_SCHEMATIC_ID=$(create_rpi_schematic)
+if [[ -z "$RPI_SCHEMATIC_ID" ]]; then
+  log_warn "Failed to create RPi schematic — skipping Raspberry Pi 4 image URL."
+else
+  log_info "Raspberry Pi 4 SD card image (rpi_generic schematic, includes U-Boot — no separate UEFI firmware needed):"
+  log_info "  ${FACTORY_BASE_URL}/image/${RPI_SCHEMATIC_ID}/${TALOS_INSTALL_VERSION}/metal-arm64.raw.xz"
+  log_info "  Flash with: xz -d -c metal-arm64.raw.xz | sudo dd conv=fsync bs=16m of=/dev/rdiskN"
+fi
 # ============================================================================
 # DOWNLOAD PXE ASSETS
 # ============================================================================

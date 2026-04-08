@@ -81,6 +81,57 @@ create_schematic() {
   echo "$schematic_id"
 }
 
+# Create a Raspberry Pi 4 schematic on the Image Factory and return the schematic ID.
+# Uses the same TALOS_SCHEMATIC_EXTENSIONS and TALOS_SCHEMATIC_EXTRA_KERNEL_ARGS as the
+# main schematic, but adds the rpi_generic overlay required for Pi 4 hardware support.
+# Returns: schematic ID (hash) on stdout
+create_rpi_schematic() {
+  local schematic_yaml="overlay:
+    image: siderolabs/sbc-raspberrypi
+    name: rpi_generic
+customization:"
+
+  # Add extensions
+  if [[ ${#TALOS_SCHEMATIC_EXTENSIONS[@]} -gt 0 ]]; then
+    schematic_yaml+=$'\n  systemExtensions:'
+    schematic_yaml+=$'\n    officialExtensions:'
+    for ext in "${TALOS_SCHEMATIC_EXTENSIONS[@]}"; do
+      schematic_yaml+=$'\n      - '"$ext"
+    done
+  fi
+
+
+  local -a rpi_kernel_args=()
+  #local -a rpi_kernel_args=()
+  for arg in "${TALOS_SCHEMATIC_EXTRA_KERNEL_ARGS[@]+"${TALOS_SCHEMATIC_EXTRA_KERNEL_ARGS[@]}"}"; do
+    rpi_kernel_args+=("$arg")
+  done
+  if [[ ${#rpi_kernel_args[@]} -gt 0 ]]; then
+    schematic_yaml+=$'\n  extraKernelArgs:'
+    for arg in "${rpi_kernel_args[@]}"; do
+      schematic_yaml+=$'\n    - '"$arg"
+    done
+  fi
+
+  log_info "Creating Raspberry Pi 4 schematic on Image Factory..."
+
+  local response
+  response=$(curl -sS -X POST "${FACTORY_BASE_URL}/schematics" \
+    -H "Content-Type: application/yaml" \
+    --data-raw "$schematic_yaml" 2>&1)
+
+  local schematic_id
+  schematic_id=$(echo "$response" | jq -r '.id // empty' 2>/dev/null)
+
+  if [[ -z "$schematic_id" ]]; then
+    log_error "Failed to create RPi schematic. Response: $response"
+    return 1
+  fi
+
+  log_success "RPi schematic created: $schematic_id"
+  echo "$schematic_id"
+}
+
 # Download PXE boot assets (kernel, initramfs, cmdline) to a local directory.
 # Args:
 #   $1 - schematic ID

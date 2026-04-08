@@ -54,6 +54,36 @@
         "clear": true
       },
       "problemMatcher": []
+    },
+    {
+      "label": "Set Active Talos/Kube Context",
+      "type": "shell",
+      "command": "${workspaceFolder}/.vscode/tasks/set-active-talos-kube-context.sh",
+      "args": [
+        "${input:envFile}",
+        "${workspaceFolder}"
+      ],
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Reset Talos Node System Volumes",
+      "type": "shell",
+      "command": "${workspaceFolder}/.vscode/tasks/reset-talos-nodes.sh",
+      "args": ["${input:envFile}"],
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true,
+        "focus": true
+      },
+      "problemMatcher": []
     }
   ],
   "inputs": [

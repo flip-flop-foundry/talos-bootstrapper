@@ -570,7 +570,8 @@ push_to_gitea_cluster_services() {
         fi
         
         # Add all files
-        git add -A -f -f -- . ':(exclude)adminTasks/pxe/assets/**'
+        # Exclude large pxe assets and symlinks in .vscode/current which may cause issues with symlinks and are not needed in the repo
+        git add -A -f -f -- . ':(exclude)adminTasks/pxe/assets/**' ':(exclude).vscode/current/**'
         
         # Commit
         if git diff --cached --quiet; then
@@ -619,6 +620,7 @@ push_to_gitea_cluster_services() {
 # Prints status information about what exists and what's missing
 # Uses environment variables from loaded env file
 check_gitea_bootstrap_status() {
+
     # Derive values from environment variables
     local org_name="${GITEA_CLUSTER_GITEA_ORG_NAME}"
     local repo_name="${GITEA_CLUSTER_SERVICES_REPO_NAME}"

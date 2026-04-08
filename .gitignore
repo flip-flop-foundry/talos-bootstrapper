@@ -1,2 +1,4 @@
 .DS_Store
 rendered/
+.vscode/current/kubeconfig
+.vscode/current/talosconfig
