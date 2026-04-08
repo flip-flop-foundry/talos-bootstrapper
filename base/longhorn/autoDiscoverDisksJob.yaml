@@ -127,14 +127,24 @@ spec:
           echo "Installing jq..."
           apk add --no-cache jq wget >/dev/null 2>&1
           
+          # Detect architecture
+          ARCH=$(uname -m)
+          case "$ARCH" in
+            x86_64)  ARCH="amd64" ;;
+            aarch64) ARCH="arm64" ;;
+            armv7l)  ARCH="arm" ;;
+            *) echo "ERROR: Unsupported architecture: $ARCH"; exit 1 ;;
+          esac
+          echo "Detected architecture: $ARCH"
+          
           # Download kubectl
           echo "Downloading kubectl v$KUBERNETES_VERSION..."
-          wget -q -O /tmp/kubectl "https://dl.k8s.io/release/v$KUBERNETES_VERSION/bin/linux/amd64/kubectl"
+          wget -q -O /tmp/kubectl "https://dl.k8s.io/release/v$KUBERNETES_VERSION/bin/linux/$ARCH/kubectl"
           chmod +x /tmp/kubectl
           
           # Download talosctl
           echo "Downloading talosctl $TALOS_VERSION..."
-          wget -q -O /tmp/talosctl "https://github.com/siderolabs/talos/releases/download/$TALOS_VERSION/talosctl-linux-amd64"
+          wget -q -O /tmp/talosctl "https://github.com/siderolabs/talos/releases/download/$TALOS_VERSION/talosctl-linux-$ARCH"
           chmod +x /tmp/talosctl
           
           export PATH="/tmp:$PATH"

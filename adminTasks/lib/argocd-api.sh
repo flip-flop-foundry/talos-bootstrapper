@@ -184,18 +184,45 @@ refresh_all_argocd_apps() {
         return 0
     fi
     
-    # Refresh each application sequentially
+    # Refresh applications in parallel batches of 5
+    local batch_size=5
     local success_count=0
     local total_count=0
+    local batch=()
+    local pids=()
     
+    # Collect app names into an array
+    local app_list=()
     while IFS= read -r app_name; do
         [[ -z "$app_name" ]] && continue
-        total_count=$((total_count + 1))
-        
-        if refresh_argocd_app "$app_name"; then
-            success_count=$((success_count + 1))
-        fi
+        app_list+=("$app_name")
     done <<< "$apps"
+    
+    total_count=${#app_list[@]}
+    log_info "Refreshing $total_count application(s) in batches of $batch_size..."
+    
+    for ((i=0; i<total_count; i++)); do
+        batch+=("${app_list[$i]}")
+        
+        # When batch is full or we've reached the last app, process the batch
+        if (( ${#batch[@]} == batch_size || i == total_count - 1 )); then
+            pids=()
+            
+            for app_name in "${batch[@]}"; do
+                refresh_argocd_app "$app_name" &
+                pids+=($!)
+            done
+            
+            # Wait for all jobs in this batch and count successes
+            for pid in "${pids[@]}"; do
+                if wait "$pid"; then
+                    success_count=$((success_count + 1))
+                fi
+            done
+            
+            batch=()
+        fi
+    done
     
     # Logout
     argocd_logout_in_pod
