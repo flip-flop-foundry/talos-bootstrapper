@@ -522,25 +522,33 @@ main() {
     
     # Determine directories
     local overlay_dir=$(dirname "$env_file")
-    # Repo root is the script's parent's parent directory (script lives in adminTasks/)
-    local repo_root="$(cd "$SCRIPT_DIR/.." && pwd)"
+    # Script lives in adminTasks/; parent directory is the submodule root (contains base/).
+    # When used as a git submodule the parent repo root is detected via git; rendered/ goes
+    # there so that overlays and rendered output live alongside each other in the cluster repo.
+    local submodule_root="$(cd "$SCRIPT_DIR/.." && pwd)"
     
-    if [[ ! -d "$repo_root/base" ]]; then
-        log_error "Could not find base directory at: $repo_root/base"
+    if [[ ! -d "$submodule_root/base" ]]; then
+        log_error "Could not find base directory at: $submodule_root/base"
         exit 1
     fi
     
-    local base_dir="$repo_root/base"
-    local output_dir="$repo_root/rendered/${OVERLAY_NAME}"
+    local base_dir="$submodule_root/base"
+    # Detect parent repo when running as a git submodule; fall back to submodule root
+    # for the classic single-repo layout.
+    local parent_root
+    parent_root="$(git -C "$submodule_root" rev-parse --show-superproject-working-tree 2>/dev/null || true)"
+    [[ -z "$parent_root" ]] && parent_root="$submodule_root"  # single-repo fallback
+    local output_dir="$parent_root/rendered/${OVERLAY_NAME}"
     
-    log_info "Repository root: $repo_root"
-    log_info "Base directory:  $base_dir"
+    log_info "Submodule root:    $submodule_root"
+    log_info "Parent repo root:  $parent_root"
+    log_info "Base directory:    $base_dir"
     log_info "Overlay directory: $overlay_dir"
-    log_info "Output directory: $output_dir"
+    log_info "Output directory:  $output_dir"
     echo ""
     
     # Process files
-    process_files "$repo_root" "$base_dir" "$overlay_dir" "$output_dir" "$dry_run"
+    process_files "$submodule_root" "$base_dir" "$overlay_dir" "$output_dir" "$dry_run"
 }
 
 main "$@"

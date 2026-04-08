@@ -9,11 +9,49 @@ GitOps-based Talos Kubernetes cluster bootstrapper. Automates provisioning of pr
 
 **Owner**: flip-flop-foundry | **Repo**: talos-bootstraper
 
+## Usage Modes
+
+This repo supports two layouts:
+
+### Mode A — Submodule (recommended for production)
+
+The repo is used as a git submodule inside a private **cluster repo**. Sensitive cluster configuration (passwords, CIDRs, node names) stays private; scripts and base templates remain public.
+
+```
+my-cluster-repo/            # Private cluster repo
+├── talos-bootstraper/      # This repo as a git submodule
+│   ├── adminTasks/         # Scripts
+│   ├── base/               # Cluster-agnostic templates
+│   └── examples/cluster-repo/  # Template files for cluster repos
+├── overlays/               # Cluster-specific configs (private)
+│   └── mycluster/
+│       └── mycluster.env
+└── rendered/               # Gitignored output
+```
+
+Scripts are invoked from the cluster repo root:
+```bash
+./talos-bootstraper/adminTasks/render-overlay.sh overlays/mycluster/mycluster.env
+```
+
+### Mode B — Single repo (development / simple setups)
+
+Clone this repo directly and create overlays inside it. Used for developing the bootstrapper itself (the `overlays/` directory contains example overlays for reference).
+
+```
+talos-bootstraper/
+├── adminTasks/
+├── base/
+└── overlays/yourCluster-l2/   # Example overlays (not for real sensitive configs)
+```
+
+Scripts automatically detect which layout is active using `git rev-parse --show-superproject-working-tree`.
+
 ## Directory Structure
 
 ```
 base/                    # Component templates with ${VAR} placeholders (cluster-agnostic)
-overlays/                # Cluster-specific .env files + optional YAML overrides
+overlays/                # Example overlays (yourCluster-l2, yourCluster-bgp) — reference only
   <cluster>/
     <cluster>.env        # All cluster config: versions, CIDRs, domains, node lists
     talos/               # Generated Talos machine configs + secrets
@@ -22,6 +60,8 @@ rendered/                # OUTPUT (gitignored) — final manifests after envsubs
 adminTasks/              # Bootstrap and rendering scripts
   lib/                   # Shared shell libraries (logging, k8s helpers, API clients)
   pxe/                   # iPXE network boot infrastructure (Docker-based)
+examples/
+  cluster-repo/          # Template for Mode A (submodule) cluster repos
 ```
 
 ### Base Components (base/)
@@ -234,12 +274,19 @@ pxe/
 
 ## How to Add a New Cluster
 
-1. Create `overlays/<cluster>/<cluster>.env` (copy from `overlays/yourCluster-l2/` or `overlays/yourCluster-bgp/`)
+**Submodule mode (Mode A — recommended):** Create the cluster overlay in your private cluster repo:
+
+1. Create `overlays/<cluster>/<cluster>.env` in the cluster repo (copy from `talos-bootstraper/overlays/yourCluster-l2/` or `yourCluster-bgp/`)
 2. Update: `OVERLAY_NAME`, `CLUSTER_EXTERNAL_DOMAIN`, CIDRs, node hostnames, versions
 3. Choose LoadBalancer mode and configure `EXCLUDED_BASE` accordingly (see above)
 4. Create `overlays/<cluster>/talos/` with generated machine configs
-5. Run `./adminTasks/render-overlay.sh overlays/<cluster>/<cluster>.env`
-6. Run `./adminTasks/cluster-bootstrap.sh overlays/<cluster>/<cluster>.env`
+5. Run `./talos-bootstraper/adminTasks/render-overlay.sh overlays/<cluster>/<cluster>.env`
+6. Run `./talos-bootstraper/adminTasks/cluster-bootstrap.sh overlays/<cluster>/<cluster>.env`
+
+**Single-repo mode (Mode B):**
+
+1. Create `overlays/<cluster>/<cluster>.env` (copy from `overlays/yourCluster-l2/` or `overlays/yourCluster-bgp/`)
+2-6. Same as above but scripts are invoked as `./adminTasks/<script>.sh overlays/<cluster>/<cluster>.env`
 
 ## Per-Node Talos Patches
 
