@@ -22,7 +22,6 @@ my-cluster-repo/            # Private cluster repo
 ├── talos-bootstraper/      # This repo as a git submodule
 │   ├── adminTasks/         # Scripts
 │   ├── base/               # Cluster-agnostic templates
-│   └── examples/cluster-repo/  # Template files for cluster repos
 ├── overlays/               # Cluster-specific configs (private)
 │   └── mycluster/
 │       └── mycluster.env
@@ -34,15 +33,19 @@ Scripts are invoked from the cluster repo root:
 ./talos-bootstraper/adminTasks/render-overlay.sh overlays/mycluster/mycluster.env
 ```
 
+See [talos-bootstraper-cluster-repo-example](https://github.com/flip-flop-foundry/talos-bootstraper-cluster-repo-example) for a complete working example.
+
 ### Mode B — Single repo (development / simple setups)
 
-Clone this repo directly and create overlays inside it. Used for developing the bootstrapper itself (the `overlays/` directory contains example overlays for reference).
+Clone this repo directly and create overlays inside it. Used for developing the bootstrapper itself (the `overlays/` directory contains reference example overlays: `yourCluster-l2/` and `yourCluster-bgp/`).
 
 ```
 talos-bootstraper/
 ├── adminTasks/
 ├── base/
-└── overlays/yourCluster-l2/   # Example overlays (not for real sensitive configs)
+├── overlays/
+│   ├── yourCluster-l2/     # Reference example (L2 LoadBalancer mode)
+│   └── yourCluster-bgp/    # Reference example (BGP LoadBalancer mode)
 ```
 
 Scripts automatically detect which layout is active using `git rev-parse --show-superproject-working-tree`.
@@ -51,8 +54,10 @@ Scripts automatically detect which layout is active using `git rev-parse --show-
 
 ```
 base/                    # Component templates with ${VAR} placeholders (cluster-agnostic)
-overlays/                # Example overlays (yourCluster-l2, yourCluster-bgp) — reference only
-  <cluster>/
+overlays/
+  yourCluster-l2/        # Reference example: L2 LoadBalancer mode (runs in this repo only)
+  yourCluster-bgp/       # Reference example: BGP LoadBalancer mode (runs in this repo only)
+  <cluster>/             # Your cluster overlay (Mode B only — see external repo for Mode A)
     <cluster>.env        # All cluster config: versions, CIDRs, domains, node lists
     talos/               # Generated Talos machine configs + secrets
       nodes/             # Optional per-node YAML patches (merged by hostname)
@@ -60,8 +65,6 @@ rendered/                # OUTPUT (gitignored) — final manifests after envsubs
 adminTasks/              # Bootstrap and rendering scripts
   lib/                   # Shared shell libraries (logging, k8s helpers, API clients)
   pxe/                   # iPXE network boot infrastructure (Docker-based)
-examples/
-  cluster-repo/          # Template for Mode A (submodule) cluster repos
 ```
 
 ### Base Components (base/)
@@ -236,7 +239,7 @@ Advertises LoadBalancer IPs via eBGP to an external router. IPs can be any routa
 - Services (Traefik, ArgoCD) are mode-agnostic — no `loadBalancerClass` needed since Cilium is the sole LB controller
 - Mode selection is purely which Cilium CRDs get rendered, controlled by `EXCLUDED_BASE`
 
-See `overlays/yourCluster-l2/` and `overlays/yourCluster-bgp/` for complete examples.
+See `overlays/yourCluster-l2/` and `overlays/yourCluster-bgp/` for reference examples in this repo.
 
 ## iPXE Network Boot
 
@@ -276,17 +279,23 @@ pxe/
 
 **Submodule mode (Mode A — recommended):** Create the cluster overlay in your private cluster repo:
 
-1. Create `overlays/<cluster>/<cluster>.env` in the cluster repo (copy from `talos-bootstraper/overlays/yourCluster-l2/` or `yourCluster-bgp/`)
-2. Update: `OVERLAY_NAME`, `CLUSTER_EXTERNAL_DOMAIN`, CIDRs, node hostnames, versions
-3. Choose LoadBalancer mode and configure `EXCLUDED_BASE` accordingly (see above)
-4. Create `overlays/<cluster>/talos/` with generated machine configs
-5. Run `./talos-bootstraper/adminTasks/render-overlay.sh overlays/<cluster>/<cluster>.env`
-6. Run `./talos-bootstraper/adminTasks/cluster-bootstrap.sh overlays/<cluster>/<cluster>.env`
+1. Fork or clone [talos-bootstraper-cluster-repo-example](https://github.com/flip-flop-foundry/talos-bootstraper-cluster-repo-example) as your private cluster repo.
+2. Create `overlays/<cluster>/<cluster>.env` in your cluster repo (copy and customize from the example).
+3. Update: `OVERLAY_NAME`, `CLUSTER_EXTERNAL_DOMAIN`, CIDRs, node hostnames, versions.
+4. Choose LoadBalancer mode and configure `EXCLUDED_BASE` accordingly (see above).
+5. Create `overlays/<cluster>/talos/` with generated machine configs.
+6. Run `./talos-bootstraper/adminTasks/render-overlay.sh overlays/<cluster>/<cluster>.env`.
+7. Run `./talos-bootstraper/adminTasks/cluster-bootstrap.sh overlays/<cluster>/<cluster>.env`.
+
+For detailed instructions, see the README.md in the example repo and this repo's `.github/copilot-instructions.md`.
 
 **Single-repo mode (Mode B):**
 
-1. Create `overlays/<cluster>/<cluster>.env` (copy from `overlays/yourCluster-l2/` or `overlays/yourCluster-bgp/`)
-2-6. Same as above but scripts are invoked as `./adminTasks/<script>.sh overlays/<cluster>/<cluster>.env`
+1. Create `overlays/<cluster>/<cluster>.env` in this repo (copy from `overlays/yourCluster-l2/` or `overlays/yourCluster-bgp/`).
+2. Update: `OVERLAY_NAME`, `CLUSTER_EXTERNAL_DOMAIN`, CIDRs, node hostnames, versions.
+3-5. Same as Mode A above, then run scripts as `./adminTasks/<script>.sh overlays/<cluster>/<cluster>.env`.
+
+**Recommendation**: Use Mode A (submodule + external example repo) for production clusters to keep sensitive configuration private.
 
 ## Per-Node Talos Patches
 

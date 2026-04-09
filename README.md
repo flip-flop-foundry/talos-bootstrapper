@@ -6,7 +6,7 @@ GitOps-based Talos Kubernetes cluster bootstrapper. Automates provisioning of pr
 
 ### Mode A — Submodule (recommended)
 
-Keep sensitive cluster configuration in a **private cluster repo** and use this repo as a git submodule. Scripts and base templates remain public; overlays (with passwords, CIDRs, domain names) stay private.
+Keeps sensitive cluster configuration in a **private cluster repo** and use this repo as a git submodule. Scripts and base templates remain public; overlays (with passwords, CIDRs, domain names) stay private.
 
 ```
 my-cluster-repo/            # Private git repo
@@ -21,23 +21,9 @@ my-cluster-repo/            # Private git repo
 
 **Quick start:**
 
-```bash
-# 1. Create your cluster repo and add this as a submodule
-git init my-cluster && cd my-cluster
-git submodule add https://github.com/flip-flop-foundry/talos-bootstraper talos-bootstraper
+Fork https://github.com/flip-flop-foundry/talos-bootstraper-cluster-repo-example
 
-# 2. Create the expected directories and copy an example overlay into your cluster repo
-mkdir -p overlays rendered
-cp -r talos-bootstraper/overlays/yourCluster-l2 overlays/mycluster
-mv overlays/mycluster/yourCluster-l2.env overlays/mycluster/mycluster.env
-
-# 3. Edit the env file, then run the scripts via the submodule path
-./talos-bootstraper/adminTasks/cluster-initialSetup.sh overlays/mycluster/mycluster.env
-./talos-bootstraper/adminTasks/render-overlay.sh overlays/mycluster/mycluster.env
-./talos-bootstraper/adminTasks/cluster-bootstrap.sh overlays/mycluster/mycluster.env
-```
-
-See [`examples/cluster-repo/`](examples/cluster-repo/) for a full template including `.vscode/tasks.json` and `.gitignore`.
+Follow the README.md in that repo to get started
 
 ### Mode B — Single repo (original)
 
@@ -66,8 +52,6 @@ rendered/                # OUTPUT (gitignored) — final manifests after renderi
 adminTasks/              # Bootstrap and rendering scripts
   lib/                   # Shared shell libraries
   pxe/                   # iPXE network boot infrastructure (Docker-based)
-examples/
-  cluster-repo/          # Template for a private cluster repo using this as a submodule
 ```
 
 ### Rendering Pipeline
