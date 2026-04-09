@@ -6,6 +6,7 @@ metadata:
 spec:
   project: cluster-services
   destination:
+    namespace: ${KUBEVIRT_NAMESPACE}
     server: https://kubernetes.default.svc
   syncPolicy:
     automated:
