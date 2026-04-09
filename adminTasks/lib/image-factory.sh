@@ -106,10 +106,12 @@ customization:"
   for arg in "${TALOS_SCHEMATIC_EXTRA_KERNEL_ARGS[@]+"${TALOS_SCHEMATIC_EXTRA_KERNEL_ARGS[@]}"}"; do
     rpi_kernel_args+=("$arg")
   done
-  schematic_yaml+=$'\n  extraKernelArgs:'
-  for arg in "${rpi_kernel_args[@]}"; do
-    schematic_yaml+=$'\n    - '"$arg"
-  done
+  if [[ ${#rpi_kernel_args[@]} -gt 0 ]]; then
+    schematic_yaml+=$'\n  extraKernelArgs:'
+    for arg in "${rpi_kernel_args[@]}"; do
+      schematic_yaml+=$'\n    - '"$arg"
+    done
+  fi
 
   log_info "Creating Raspberry Pi 4 schematic on Image Factory..."
 

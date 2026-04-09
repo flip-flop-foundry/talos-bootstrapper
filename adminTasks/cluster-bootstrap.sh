@@ -39,11 +39,19 @@ export ENVSUBST_VARS=$(env | cut -d= -f1 | sed 's/^/\$/' | paste -sd: -)
 
 export SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export OVERLAY_DIR="$(cd "$(dirname "$CONFIG_FILE")" && pwd)"
-export RENDERED_OVERLAY_DIR="$(cd "$OVERLAY_DIR/../../rendered/$OVERLAY_NAME" && pwd)"
-export BASE_DIR="$(cd "$OVERLAY_DIR/../../base" && pwd)"
 export TALOSCONFIG=$OVERLAY_DIR/talos/talosconfig
+# GIT_ROOT is the git root of the overlay (parent/cluster repo when used as a submodule).
 export GIT_ROOT="$(git -C "$OVERLAY_DIR" rev-parse --show-toplevel)"
 export LIB_DIR="$SCRIPT_DIR/lib"
+
+# Submodule-aware path detection:
+# base/ always lives in the submodule root (adminTasks/../).
+# rendered/ lives alongside overlays/ in the parent/cluster repo root.
+SUBMODULE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PARENT_ROOT="$(git -C "$SUBMODULE_ROOT" rev-parse --show-superproject-working-tree 2>/dev/null || true)"
+[[ -z "$PARENT_ROOT" ]] && PARENT_ROOT="$SUBMODULE_ROOT"  # single-repo fallback
+export BASE_DIR="$SUBMODULE_ROOT/base"
+export RENDERED_OVERLAY_DIR="$PARENT_ROOT/rendered/$OVERLAY_NAME"
 
 export NR_OF_CONTROL_NODES=${#TALOS_CONTROL_NODES[@]}
 

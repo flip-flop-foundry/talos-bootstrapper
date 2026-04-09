@@ -9,12 +9,55 @@ GitOps-based Talos Kubernetes cluster bootstrapper. Automates provisioning of pr
 
 **Owner**: flip-flop-foundry | **Repo**: talos-bootstraper
 
+## Usage Modes
+
+This repo supports two layouts:
+
+### Mode A — Submodule (recommended for production)
+
+The repo is used as a git submodule inside a private **cluster repo**. Sensitive cluster configuration (passwords, CIDRs, node names) stays private; scripts and base templates remain public.
+
+```
+my-cluster-repo/            # Private cluster repo
+├── talos-bootstraper/      # This repo as a git submodule
+│   ├── adminTasks/         # Scripts
+│   ├── base/               # Cluster-agnostic templates
+├── overlays/               # Cluster-specific configs (private)
+│   └── mycluster/
+│       └── mycluster.env
+└── rendered/               # Gitignored output
+```
+
+Scripts are invoked from the cluster repo root:
+```bash
+./talos-bootstraper/adminTasks/render-overlay.sh overlays/mycluster/mycluster.env
+```
+
+See [talos-bootstraper-cluster-repo-example](https://github.com/flip-flop-foundry/talos-bootstraper-cluster-repo-example) for a complete working example.
+
+### Mode B — Single repo (development / simple setups)
+
+Clone this repo directly and create overlays inside it. Used for developing the bootstrapper itself (the `overlays/` directory contains reference example overlays: `yourCluster-l2/` and `yourCluster-bgp/`).
+
+```
+talos-bootstraper/
+├── adminTasks/
+├── base/
+├── overlays/
+│   ├── yourCluster-l2/     # Reference example (L2 LoadBalancer mode)
+│   └── yourCluster-bgp/    # Reference example (BGP LoadBalancer mode)
+```
+
+Scripts automatically detect which layout is active using `git rev-parse --show-superproject-working-tree`.
+
 ## Directory Structure
 
 ```
 base/                    # Component templates with ${VAR} placeholders (cluster-agnostic)
-overlays/                # Cluster-specific .env files + optional YAML overrides
-  <cluster>/
+overlays/
+  yourCluster-l2/        # Reference example: L2 LoadBalancer mode (runs in this repo only)
+  yourCluster-bgp/       # Reference example: BGP LoadBalancer mode (runs in this repo only)
+  <cluster>/             # Your cluster overlay (Mode B only — see external repo for Mode A)
     <cluster>.env        # All cluster config: versions, CIDRs, domains, node lists
     talos/               # Generated Talos machine configs + secrets
       nodes/             # Optional per-node YAML patches (merged by hostname)
@@ -196,7 +239,7 @@ Advertises LoadBalancer IPs via eBGP to an external router. IPs can be any routa
 - Services (Traefik, ArgoCD) are mode-agnostic — no `loadBalancerClass` needed since Cilium is the sole LB controller
 - Mode selection is purely which Cilium CRDs get rendered, controlled by `EXCLUDED_BASE`
 
-See `overlays/yourCluster-l2/` and `overlays/yourCluster-bgp/` for complete examples.
+See `overlays/yourCluster-l2/` and `overlays/yourCluster-bgp/` for reference examples in this repo.
 
 ## iPXE Network Boot
 
@@ -234,12 +277,25 @@ pxe/
 
 ## How to Add a New Cluster
 
-1. Create `overlays/<cluster>/<cluster>.env` (copy from `overlays/yourCluster-l2/` or `overlays/yourCluster-bgp/`)
-2. Update: `OVERLAY_NAME`, `CLUSTER_EXTERNAL_DOMAIN`, CIDRs, node hostnames, versions
-3. Choose LoadBalancer mode and configure `EXCLUDED_BASE` accordingly (see above)
-4. Create `overlays/<cluster>/talos/` with generated machine configs
-5. Run `./adminTasks/render-overlay.sh overlays/<cluster>/<cluster>.env`
-6. Run `./adminTasks/cluster-bootstrap.sh overlays/<cluster>/<cluster>.env`
+**Submodule mode (Mode A — recommended):** Create the cluster overlay in your private cluster repo:
+
+1. Fork or clone [talos-bootstraper-cluster-repo-example](https://github.com/flip-flop-foundry/talos-bootstraper-cluster-repo-example) as your private cluster repo.
+2. Create `overlays/<cluster>/<cluster>.env` in your cluster repo (copy and customize from the example).
+3. Update: `OVERLAY_NAME`, `CLUSTER_EXTERNAL_DOMAIN`, CIDRs, node hostnames, versions.
+4. Choose LoadBalancer mode and configure `EXCLUDED_BASE` accordingly (see above).
+5. Create `overlays/<cluster>/talos/` with generated machine configs.
+6. Run `./talos-bootstraper/adminTasks/render-overlay.sh overlays/<cluster>/<cluster>.env`.
+7. Run `./talos-bootstraper/adminTasks/cluster-bootstrap.sh overlays/<cluster>/<cluster>.env`.
+
+For detailed instructions, see the README.md in the example repo and this repo's `.github/copilot-instructions.md`.
+
+**Single-repo mode (Mode B):**
+
+1. Create `overlays/<cluster>/<cluster>.env` in this repo (copy from `overlays/yourCluster-l2/` or `overlays/yourCluster-bgp/`).
+2. Update: `OVERLAY_NAME`, `CLUSTER_EXTERNAL_DOMAIN`, CIDRs, node hostnames, versions.
+3-5. Same as Mode A above, then run scripts as `./adminTasks/<script>.sh overlays/<cluster>/<cluster>.env`.
+
+**Recommendation**: Use Mode A (submodule + external example repo) for production clusters to keep sensitive configuration private.
 
 ## Per-Node Talos Patches
 
@@ -691,7 +747,7 @@ When you are assigned to an issue the `ai-working` label is added automatically.
 
 ### Before Writing Any Code
 
-1. **Read the issue carefully.** Identify every explicit requirement and any implicit constraints.
+1. **Read the issue carefully.** Identify every explicit requirement and any implicit constraints (e.g. "don't break existing clusters").
 2. **Post a planning comment first.** Before writing any code, post a comment on the issue that outlines:
    - Your understanding of the problem
    - The files you plan to change and why
@@ -699,8 +755,7 @@ When you are assigned to an issue the `ai-working` label is added automatically.
    - Any questions or ambiguities you need resolved
    Wait for at least one response/approval before proceeding. Do not guess on ambiguous requirements.
 3. **Iterate with comments.** For larger tasks, post progress comments at key decision points (e.g. after choosing an approach, before implementing a complex change). This is the equivalent of "planning mode" in editors.
-4. If possible without adding a lot of complexity, avoid breaking existing clusters. Breaking existing clusters/deployments can be acceptable, if **stated very clearly** and **explained why** this is needed
-
+4. If possible without adding a lot of complexity, avoid breaking existing clusters. Breaking existing clusters/deployments can be acceptable, if **stated very clearly** and **explained why** this is needed.
 
 ### Making Changes
 
@@ -784,8 +839,3 @@ Check the output to confirm the security settings from the [Security Best Practi
 - **Description**: explain *what* changed, *why*, and list every file modified.
 - **One concern per PR.** If an issue covers multiple unrelated concerns, raise separate PRs or ask the requester how to proceed.
 - **Do not self-merge.** Always request a human review.
-
-
-
-curl -LO https://factory.talos.dev/image/ee21ef4a5ef808a9b7484cc0dda0f25075021691c8c09a276591eedb638ea1f9/v1.9.5/metal-arm64.raw.xz
-  xz -d metal-arm64.raw.xz

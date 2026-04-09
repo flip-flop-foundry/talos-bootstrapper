@@ -118,13 +118,6 @@ detect_node_disks() {
         return 1
     fi
 
-    # Parse and filter disks
-    # Accepts: { items: [...] } or an array of objects or newline-delimited objects
-    local usb_filter="."
-    if [ "$ignore_usb" = "true" ]; then
-        log_info "Filtering out USB disks (LONGHORN_IGNORE_USB_DISKS=true)"
-        usb_filter='select(($obj.spec.transport // "" | test("usb"; "i")) | not)'
-    fi
 
     local non_system_disks
     non_system_disks=$(echo "$disks_json" | jq -r --arg system_disk "$system_disk" '

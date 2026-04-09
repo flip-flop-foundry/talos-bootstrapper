@@ -82,10 +82,17 @@ source "$SCRIPT_DIR/lib/image-factory.sh" || { log_error "Failed to load image-f
 source "$SCRIPT_DIR/lib/talos.sh" || { log_error "Failed to load talos.sh"; exit 1; }
 
 export OVERLAY_DIR="$(cd "$(dirname "$CONFIG_FILE")" && pwd)"
-export BASE_DIR="$(cd "$OVERLAY_DIR/../../base" && pwd)"
-export RENDERED_DIR="$(cd "$OVERLAY_DIR/../.." && pwd)/rendered/$OVERLAY_NAME"
 export NR_OF_CONTROL_NODES=${#TALOS_CONTROL_NODES[@]}
 export TALOSCONFIG="$OVERLAY_DIR/talos/talosconfig"
+
+# Submodule-aware path detection:
+# base/ always lives in the submodule root (adminTasks/../).
+# rendered/ lives alongside overlays/ in the parent/cluster repo root.
+SUBMODULE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PARENT_ROOT="$(git -C "$SUBMODULE_ROOT" rev-parse --show-superproject-working-tree 2>/dev/null || true)"
+[[ -z "$PARENT_ROOT" ]] && PARENT_ROOT="$SUBMODULE_ROOT"  # single-repo fallback
+export BASE_DIR="$SUBMODULE_ROOT/base"
+export RENDERED_DIR="$PARENT_ROOT/rendered/$OVERLAY_NAME"
 
 
 log_info "Using Script Directory:  $SCRIPT_DIR"
