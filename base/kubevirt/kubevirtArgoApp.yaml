@@ -2,11 +2,10 @@ apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: kubevirt
-  namespace: ${KUBEVIRT_NAMESPACE}
+  namespace: ${ARGOCD_NAMESPACE}
 spec:
   project: cluster-services
   destination:
-    namespace: ${KUBEVIRT_NAMESPACE}
     server: https://kubernetes.default.svc
   syncPolicy:
     automated:
@@ -25,7 +24,3 @@ spec:
     - repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
       path: rendered/${OVERLAY_NAME}/kubevirt
-      ref: values
-      directory:
-        recurse: false
-        include: "{kubevirtCR.yaml}"
