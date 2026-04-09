@@ -190,25 +190,6 @@ else
 fi
 
 # ============================================================================
-# KUBEVIRT OPERATOR INSTALLATION (OPTIONAL)
-# ============================================================================
-# KubeVirt has no official Helm chart. The operator is deployed from the upstream
-# release manifest. The KubeVirt CR (configuration) is managed by ArgoCD.
-# This step only runs if the kubevirt component is rendered (not in EXCLUDED_BASE).
-
-if [[ -d "${RENDERED_OVERLAY_DIR}/kubevirt" ]]; then
-  if kubectl get deployment virt-operator -n "${KUBEVIRT_NAMESPACE}" &>/dev/null; then
-    log_info "KubeVirt operator already installed, skipping installation."
-  else
-    log_info "Installing KubeVirt operator ${KUBEVIRT_VERSION}..."
-    kubectl apply -f "https://github.com/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/kubevirt-operator.yaml"
-    log_info "Waiting for KubeVirt operator to be ready..."
-    kubectl wait --for=condition=Available deployment/virt-operator -n "${KUBEVIRT_NAMESPACE}" --timeout=300s
-    log_success "KubeVirt operator installed successfully"
-  fi
-fi
-
-# ============================================================================
 # BOOTSTRAP GIT SERVER (IF GITEA NOT YET BOOTSTRAPPED)
 # ============================================================================
 

@@ -10,15 +10,14 @@ KubeVirt enables running legacy or non-containerisable workloads as VMs within t
 
 ## How it is deployed
 
-KubeVirt does **not** have an official Helm chart. The deployment consists of two parts:
+KubeVirt does **not** have an official Helm chart. The deployment is fully managed by ArgoCD using a **Kustomize remote resource**:
 
-1. **Operator** — deployed during cluster bootstrap (`cluster-bootstrap.sh`) by applying the upstream release manifest directly:
-   ```bash
-   kubectl apply -f https://github.com/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/kubevirt-operator.yaml
-   ```
-   This step is idempotent and only runs when the kubevirt component is rendered (not in `EXCLUDED_BASE`) and the operator is not yet present.
+- `kustomization.yaml` references the upstream `kubevirt-operator.yaml` release manifest directly from GitHub, plus the local `kubevirtCR.yaml`.
+- ArgoCD detects the `kustomization.yaml` and runs `kustomize build`, which downloads the operator manifest and combines it with the CR.
+- The operator manifest includes the namespace, CRDs, RBAC, and the virt-operator Deployment.
+- The `kubevirtCR.yaml` contains the KubeVirt custom resource that configures the actual KubeVirt installation (networking, tolerations, etc.).
 
-2. **KubeVirt CR** — managed by an ArgoCD Application (`kubevirtArgoApp.yaml`) that deploys the `KubeVirt` custom resource from the Gitea repository. This CR controls the actual KubeVirt configuration (feature gates, tolerations, networking defaults).
+This follows the same pattern as the `csi-snapshot-controller`, which also deploys upstream manifests directly via ArgoCD.
 
 ## Enabling KubeVirt
 
@@ -27,13 +26,8 @@ KubeVirt is **excluded by default** in the example overlays. To enable it:
 1. Remove `"kubevirt"` from the `EXCLUDED_BASE` array in your overlay's `.env` file.
 2. Ensure `KUBEVIRT_VERSION` and `KUBEVIRT_NAMESPACE` are exported (they are pre-defined in the example `.env` files).
 3. Re-render: `./adminTasks/render-overlay.sh overlays/<cluster>/<cluster>.env`
-4. For new clusters, `cluster-bootstrap.sh` handles operator deployment automatically.
-5. For existing clusters, manually deploy the operator first:
-   ```bash
-   source overlays/<cluster>/<cluster>.env
-   kubectl apply -f "https://github.com/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/kubevirt-operator.yaml"
-   ```
-   Then apply the ArgoCD Application:
+4. For new clusters, `cluster-bootstrap.sh` deploys the ArgoCD Application automatically.
+5. For existing clusters, apply the ArgoCD Application:
    ```bash
    kubectl apply -f rendered/<cluster>/kubevirt/kubevirtArgoApp.yaml
    ```
@@ -42,11 +36,7 @@ KubeVirt is **excluded by default** in the example overlays. To enable it:
 
 1. Update `KUBEVIRT_VERSION` in your overlay's `.env` file.
 2. Re-render the overlay.
-3. Apply the new operator version:
-   ```bash
-   kubectl apply -f "https://github.com/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/kubevirt-operator.yaml"
-   ```
-4. ArgoCD will automatically sync the updated KubeVirt CR.
+3. ArgoCD will automatically sync the updated operator and CR via the new Kustomize remote resource URL.
 
 ## Talos-specific notes
 
