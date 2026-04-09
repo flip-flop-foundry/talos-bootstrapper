@@ -535,9 +535,18 @@ main() {
     local base_dir="$submodule_root/base"
     # Detect parent repo when running as a git submodule; fall back to submodule root
     # for the classic single-repo layout.
-    local parent_root
-    parent_root="$(git -C "$submodule_root" rev-parse --show-superproject-working-tree 2>/dev/null || true)"
-    [[ -z "$parent_root" ]] && parent_root="$submodule_root"  # single-repo fallback
+    local parent_root=""
+    if command -v git >/dev/null 2>&1; then
+        if parent_root="$(git -C "$submodule_root" rev-parse --show-superproject-working-tree 2>/dev/null)"; then
+            [[ -z "$parent_root" ]] && parent_root="$submodule_root"  # single-repo fallback
+        else
+            log_warn "Failed to detect git superproject root from $submodule_root; falling back to submodule root for rendered output."
+            parent_root="$submodule_root"
+        fi
+    else
+        log_warn "git is not installed; cannot detect git superproject root. Falling back to submodule root for rendered output."
+        parent_root="$submodule_root"
+    fi
     local output_dir="$parent_root/rendered/${OVERLAY_NAME}"
     
     log_info "Submodule root:    $submodule_root"

@@ -6,7 +6,7 @@ GitOps-based Talos Kubernetes cluster bootstrapper. Automates provisioning of pr
 
 ### Mode A — Submodule (recommended)
 
-Keeps sensitive cluster configuration in a **private cluster repo** and use this repo as a git submodule. Scripts and base templates remain public; overlays (with passwords, CIDRs, domain names) stay private.
+Keeps sensitive cluster configuration in a **private cluster repo** and uses this repo as a git submodule. Scripts and base templates remain public; overlays (with passwords, CIDRs, domain names) stay private.
 
 ```
 my-cluster-repo/            # Private git repo
