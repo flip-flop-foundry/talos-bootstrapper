@@ -91,9 +91,9 @@
       "id": "envFile",
       "type": "pickString",
       "description": "Select the overlay env file to use",
-      "default": "overlays/yourCluster/yourCluster.env",
+      "default": "overlays/yourCluster-l2/yourCluster-l2.env",
       "options": [
-        "overlays/yourCluster/yourCluster.env"
+        "overlays/yourCluster-l2/yourCluster-l2.env"
       ]
     }
   ]

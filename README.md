@@ -26,7 +26,8 @@ my-cluster-repo/            # Private git repo
 git init my-cluster && cd my-cluster
 git submodule add https://github.com/flip-flop-foundry/talos-bootstraper talos-bootstraper
 
-# 2. Copy an example overlay into your cluster repo
+# 2. Create the expected directories and copy an example overlay into your cluster repo
+mkdir -p overlays rendered
 cp -r talos-bootstraper/overlays/yourCluster-l2 overlays/mycluster
 mv overlays/mycluster/yourCluster-l2.env overlays/mycluster/mycluster.env
 
@@ -57,10 +58,10 @@ mv overlays/mycluster/yourCluster-l2.env overlays/mycluster/mycluster.env
 
 ```
 base/                    # Component templates with ${VAR} placeholders
-overlays/                # Example overlays (yourCluster-l2, yourCluster-bgp)
+overlays/                # Mode A: example overlays in this repo; Mode B: real cluster overlays live here
   <cluster>/
-    <cluster>.env        # All cluster configuration
-    talos/               # Generated Talos machine configs + overlay patches
+    <cluster>.env        # All cluster configuration for that cluster overlay
+    talos/               # Generated Talos machine configs + optional cluster/node patch files
 rendered/                # OUTPUT (gitignored) — final manifests after rendering
 adminTasks/              # Bootstrap and rendering scripts
   lib/                   # Shared shell libraries
