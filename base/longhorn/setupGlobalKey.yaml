@@ -17,18 +17,16 @@ spec:
         effect: "NoSchedule"
       containers:
       - name: generate
-        image: registry.k8s.io/kubectl:v${KUBERNETES_VERSION}
+        image: alpine/k8s:${KUBERNETES_VERSION}
         command:
-        - /bin/bash
+        - /bin/sh
         - -c
         - |
-          #!/bin/bash
-          
           SECRET_NAME="longhorn-luks-global-key"
           NAMESPACE="longhorn-system"
           
           # Check if secret already exists
-          if kubectl get secret "$SECRET_NAME" -n "$NAMESPACE" &>/dev/null; then
+          if kubectl get secret "$SECRET_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
             echo "Secret $SECRET_NAME already exists, skipping generation"
             exit 0
           fi

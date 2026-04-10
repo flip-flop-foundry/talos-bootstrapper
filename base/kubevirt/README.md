@@ -54,6 +54,7 @@ None beyond standard cluster infrastructure. KubeVirt uses:
 - Kubernetes API for scheduling and management
 - Node-level KVM for hardware virtualization
 - Cilium for pod/VM networking (masquerade mode by default)
+- Longhorn RWX migratable block volumes for stateful VM live migration tests
 
 ## Dependents
 
@@ -73,6 +74,38 @@ kubectl get kubevirt -n kubevirt -o yaml
 # All components should show phase "Deployed"
 kubectl get kubevirt kubevirt -n kubevirt -o jsonpath='{.status.phase}'
 ```
+
+### Live migration test resources
+
+The `tuborgnetes` overlay contains sample resources for live migration testing:
+
+- `overlays/tuborgnetes/kubevirt/kubevirtLiveMigrationTestPvc.yaml`
+- `overlays/tuborgnetes/kubevirt/kubevirtLiveMigrationTestVm.yaml`
+
+The sample VM is configured with `evictionStrategy: LiveMigrate` and mounts a Longhorn RWX migratable block PVC.
+
+To test migration manually:
+
+```bash
+# Check that the test VMI is marked live-migratable
+kubectl get vmi kubevirt-live-migration-test -n kubevirt -o jsonpath='{.status.conditions[?(@.type=="LiveMigratable")].status}'
+
+# Trigger a migration
+cat <<'EOF' | kubectl apply -f -
+apiVersion: kubevirt.io/v1
+kind: VirtualMachineInstanceMigration
+metadata:
+  name: kubevirt-live-migration-test-migration
+  namespace: kubevirt
+spec:
+  vmiName: kubevirt-live-migration-test
+EOF
+
+# Observe migration progress and source/target nodes
+kubectl get vmi kubevirt-live-migration-test -n kubevirt -o yaml
+```
+
+You can also verify drain behavior by cordoning and draining the node currently hosting the VM.
 
 ### Creating a VM
 
@@ -116,8 +149,29 @@ chmod +x virtctl
 ./virtctl console <vm-name>
 ```
 
+### Console access options
+
+`virtctl` remains the most direct option for serial console and VNC access. If you want to avoid local client installation on user laptops, two practical alternatives are:
+
+- Run `virtctl` in a browser-accessible admin environment (for example, a hardened toolbox pod or shared jump-host) and provide shell access there.
+- Deploy a web UI that integrates with KubeVirt subresources (for example, KubeVirt Manager) behind your existing ingress/auth stack.
+
+For production access, treat VNC/noVNC endpoints as privileged operations and protect them with SSO, RBAC, and audit logging.
+
 ### Future enhancements
 
 - **CDI (Containerized Data Importer)** — for importing VM disk images and managing DataVolumes. Can be added as a separate component.
 - **Multus** — for attaching VMs to additional networks (bridge, SR-IOV).
 - **Snapshot/restore** — KubeVirt supports VM snapshots via the CSI snapshot controller already deployed in this cluster.
+
+### kubevirt-manager compatibility
+
+The KubeVirt CR in this repository enables a conservative subset of feature gates used by kubevirt-manager:
+
+- `LiveMigration`
+- `Snapshot`
+- `VMExport`
+- `ExpandDisks`
+- `HotplugVolumes`
+
+`HostDisk` and `ExperimentalIgnitionSupport` are intentionally not enabled by default due to broader security and operational impact.

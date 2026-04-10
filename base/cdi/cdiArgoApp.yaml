@@ -1,0 +1,29 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cdi
+  namespace: ${ARGOCD_NAMESPACE}
+  annotations:
+    argocd.argoproj.io/sync-wave: "7"
+spec:
+  project: cluster-services
+  destination:
+    namespace: ${CDI_NAMESPACE}
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      - CreateNamespace=true
+    retry:
+      limit: 10
+      backoff:
+        duration: 20s
+        factor: 2
+        maxDuration: 10m
+  sources:
+    - repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
+      targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
+      path: rendered/${OVERLAY_NAME}/cdi
