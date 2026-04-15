@@ -25,7 +25,7 @@ spec:
   sources:
     - repoURL: $GITEA_CLUSTER_SERVICES_REPO_URL
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
-      path: rendered/${OVERLAY_NAME}/cert-manager
+      path: _rendered/cert-manager
       directory:
         recurse: false
         include: "{cluster-ca.yaml}"

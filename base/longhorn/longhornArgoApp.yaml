@@ -40,13 +40,13 @@ spec:
       helm:
         releaseName: longhorn
         valueFiles:
-          - $values/rendered/${OVERLAY_NAME}/longhorn/longhornValues.yaml
+          - $values/_rendered/longhorn/longhornValues.yaml
     - repoURL: $GITEA_CLUSTER_SERVICES_REPO_URL
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
       ref: values
     - repoURL: $GITEA_CLUSTER_SERVICES_REPO_URL
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
-      path: rendered/${OVERLAY_NAME}/longhorn
+      path: _rendered/longhorn
       directory:
         recurse: false
         exclude: "{longhornValues.yaml,longhornArgoApp.yaml}"

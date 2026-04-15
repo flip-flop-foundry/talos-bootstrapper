@@ -31,10 +31,10 @@ spec:
       helm:
         releaseName: cilium
         valueFiles:
-          - $values/rendered/${OVERLAY_NAME}/cilium/ciliumHelmValues.yaml
+          - $values/_rendered/cilium/ciliumHelmValues.yaml
     - repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
-      path: rendered/${OVERLAY_NAME}/cilium
+      path: _rendered/cilium
       ref: values
       directory:
         recurse: false

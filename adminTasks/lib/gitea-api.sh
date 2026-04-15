@@ -526,14 +526,14 @@ push_to_gitea_cluster_services() {
     local auth_repo_url="https://${username}:${password}@${GITEA_DOMAIN_NAME}/${GITEA_CLUSTER_GITEA_ORG_NAME}/${GITEA_CLUSTER_SERVICES_REPO_NAME}.git"
     
     # Configure git remote
-    if ! configure_git_remote "$remote_name" "$repo_url" "$GIT_ROOT"; then
+    if ! configure_git_remote "$remote_name" "$repo_url" "$OVERLAY_DIR"; then
         log_error "Failed to configure git remote"
         return 1
     fi
     echo ""
     
     # Get current branch name
-    cd "$GIT_ROOT"
+    cd "$OVERLAY_DIR"
     local current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
     
     # Determine target branch
@@ -550,7 +550,7 @@ push_to_gitea_cluster_services() {
         log_info "Creating temporary repository copy in: $temp_repo_dir"
         
         # Copy repository
-        rsync -a "$GIT_ROOT/" "$temp_repo_dir/" || {
+        rsync -a "$OVERLAY_DIR/" "$temp_repo_dir/" || {
             log_error "Failed to copy repository to temp directory"
             return 1
         }
@@ -570,8 +570,7 @@ push_to_gitea_cluster_services() {
         fi
         
         # Add all files
-        # Exclude large pxe assets and symlinks in .vscode/current which may cause issues with symlinks and are not needed in the repo
-        git add -A -f -f -- . ':(exclude)adminTasks/pxe/assets/**' ':(exclude).vscode/current/**'
+        git add -A -f -f -- .
         
         # Commit
         if git diff --cached --quiet; then
@@ -590,7 +589,7 @@ push_to_gitea_cluster_services() {
         else
             log_error "Failed to push to Gitea"
             log_error "Git output: $push_output"
-            cd "$GIT_ROOT"
+            cd "$OVERLAY_DIR"
             return 1
         fi
         

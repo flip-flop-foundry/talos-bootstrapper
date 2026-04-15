@@ -6,10 +6,10 @@ set -euo pipefail
 #
 # Usage: renderer.sh <ENV_FILE> [--dry-run]
 #
-# This script loads an environment file (e.g. talos/overlays/yourCluster/yourCluster.env),
-# collects YAML files from talos/base/* (depth=1) and the overlay's immediate
+# This script loads an environment file (e.g. overlays/yourCluster/yourCluster.env),
+# collects YAML files from talos-bootstraper/base/* (depth=1) and the overlay's immediate
 # subdirectories (recursive), renders them with envsubst, merges collisions
-# (overlay wins) using yq, and outputs to talos/rendered/${OVERLAY_NAME}.
+# (overlay wins) using yq, and outputs to the overlay's _rendered/ directory.
 ################################################################################
 
 # Get script directory and load logging library
@@ -181,8 +181,8 @@ collect_overlay_files() {
         
         local component_name=$(basename "$component_dir")
         
-        # Skip rendered output directories
-        [[ "$component_name" == *"-rendered" ]] && continue
+        # Skip rendered output directory
+        [[ "$component_name" == "_rendered" ]] && continue
         
         # Find YAML files recursively in this component
         while IFS= read -r file; do
@@ -522,42 +522,28 @@ main() {
     
     # Determine directories
     local overlay_dir=$(dirname "$env_file")
-    # Script lives in adminTasks/; parent directory is the submodule root (contains base/).
-    # When used as a git submodule the parent repo root is detected via git; rendered/ goes
-    # there so that overlays and rendered output live alongside each other in the cluster repo.
-    local submodule_root="$(cd "$SCRIPT_DIR/.." && pwd)"
+    # Script lives in adminTasks/; parent directory is the repo root (contains base/).
+    local talos_submodule_root="$(cd "$SCRIPT_DIR/.." && pwd)"
     
-    if [[ ! -d "$submodule_root/base" ]]; then
-        log_error "Could not find base directory at: $submodule_root/base"
+    if [[ ! -d "$talos_submodule_root/base" ]]; then
+        log_error "Could not find base directory at: $talos_submodule_root/base"
         exit 1
     fi
     
-    local base_dir="$submodule_root/base"
-    # Detect parent repo when running as a git submodule; fall back to submodule root
-    # for the classic single-repo layout.
-    local parent_root=""
-    if command -v git >/dev/null 2>&1; then
-        if parent_root="$(git -C "$submodule_root" rev-parse --show-superproject-working-tree 2>/dev/null)"; then
-            [[ -z "$parent_root" ]] && parent_root="$submodule_root"  # single-repo fallback
-        else
-            log_warn "Failed to detect git superproject root from $submodule_root; falling back to submodule root for rendered output."
-            parent_root="$submodule_root"
-        fi
-    else
-        log_warn "git is not installed; cannot detect git superproject root. Falling back to submodule root for rendered output."
-        parent_root="$submodule_root"
-    fi
-    local output_dir="$parent_root/rendered/${OVERLAY_NAME}"
+    local base_dir="$talos_submodule_root/base"
+    # Output rendered files into _rendered/ inside the overlay directory.
+    # This keeps rendered output co-located with the overlay config so that
+    # overlay submodules are self-contained for ArgoCD.
+    local output_dir="$overlay_dir/_rendered"
     
-    log_info "Submodule root:    $submodule_root"
-    log_info "Parent repo root:  $parent_root"
+    log_info "Repository root:   $talos_submodule_root"
     log_info "Base directory:    $base_dir"
     log_info "Overlay directory: $overlay_dir"
     log_info "Output directory:  $output_dir"
     echo ""
     
     # Process files
-    process_files "$submodule_root" "$base_dir" "$overlay_dir" "$output_dir" "$dry_run"
+    process_files "$talos_submodule_root" "$base_dir" "$overlay_dir" "$output_dir" "$dry_run"
 }
 
 main "$@"

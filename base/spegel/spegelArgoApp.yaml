@@ -45,7 +45,7 @@ spec:
       helm:
         releaseName: spegel
         valueFiles:
-          - $values/rendered/${OVERLAY_NAME}/spegel/spegelHelmValues.yaml
+          - $values/_rendered/spegel/spegelHelmValues.yaml
     - repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
       ref: values

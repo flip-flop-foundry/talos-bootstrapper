@@ -37,10 +37,10 @@ spec:
       helm:
         releaseName: external-dns
         valueFiles:
-          - $values/rendered/${OVERLAY_NAME}/external-dns/externalDnsHelmValues.yaml
+          - $values/_rendered/external-dns/externalDnsHelmValues.yaml
     - repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
-      path: rendered/${OVERLAY_NAME}/external-dns
+      path: _rendered/external-dns
       ref: values
       directory:
         recurse: false

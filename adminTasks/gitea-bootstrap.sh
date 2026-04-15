@@ -238,7 +238,6 @@ main() {
     # Determine directories
     export SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
     export OVERLAY_DIR="$(cd "$(dirname "$env_file")" && pwd)"
-    export GIT_ROOT="$(git -C "$OVERLAY_DIR" rev-parse --show-toplevel)"
     
     # Setup kubectl config
     local talosconfig="$OVERLAY_DIR/talos/talosconfig"
@@ -254,7 +253,6 @@ main() {
     
     log_info "Script directory: $SCRIPT_DIR"
     log_info "Overlay directory: $OVERLAY_DIR"
-    log_info "Git root: $GIT_ROOT"
     log_info "Kubeconfig: $KUBECONFIG"
     echo ""
     
@@ -471,7 +469,7 @@ main() {
         # Extract just the token value (ignore token_id)
         local argocd_service_account_token="${argocd_token_result#*|}"
         
-        if ! create_argocd_repo_creds_secret "https://${GITEA_DOMAIN_NAME}/${GITEA_CLUSTER_GITEA_ORG_NAME}/${GITEA_CLUSTER_SERVICES_REPO_NAME}" "$ARGOCD_SERVICE_ACCOUNT_USERNAME" "$argocd_service_account_token" "$ARGOCD_SERVICE_ACCOUNT_TOKEN_NAME" "$ARGOCD_SERVICE_ACCOUNT_REPO_SECRET_DESCRIPTION"; then
+        if ! create_argocd_repo_creds_secret "https://${GITEA_DOMAIN_NAME}" "$ARGOCD_SERVICE_ACCOUNT_USERNAME" "$argocd_service_account_token" "$ARGOCD_SERVICE_ACCOUNT_TOKEN_NAME" "$ARGOCD_SERVICE_ACCOUNT_REPO_SECRET_DESCRIPTION"; then
             log_error "Failed to create ArgoCD repo-creds secret"
             exit 1
         fi

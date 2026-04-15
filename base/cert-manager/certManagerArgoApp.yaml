@@ -34,7 +34,7 @@ spec:
       helm:
         releaseName: cert-manager
         valueFiles:
-          - $values/rendered/${OVERLAY_NAME}/cert-manager/certManagerValues.yaml
+          - $values/_rendered/cert-manager/certManagerValues.yaml
     - repoURL: $GITEA_CLUSTER_SERVICES_REPO_URL
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
       ref: values
