@@ -1,0 +1,45 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: kubevirt-manager-ui-tls
+  namespace: ${KUBEVIRT_MANAGER_NAMESPACE}
+  annotations:
+    description: "TLS certificate for kubevirt-manager UI"
+spec:
+  secretName: kubevirt-manager-ui-tls-cert
+  issuerRef:
+    name: ${TALOS_CLUSTER_NAME}-ca-issuer
+    kind: ClusterIssuer
+  dnsNames:
+    - kubevirt-manager.${CLUSTER_EXTERNAL_DOMAIN}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: kubevirt-manager-ui-auth
+  namespace: ${KUBEVIRT_MANAGER_NAMESPACE}
+spec:
+  basicAuth:
+    secret: kubevirt-manager-ui-auth-secret
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: kubevirt-manager-ui
+  namespace: ${KUBEVIRT_MANAGER_NAMESPACE}
+  annotations:
+    advertise-via-dns: "true"
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`kubevirt-manager.${CLUSTER_EXTERNAL_DOMAIN}`)
+      middlewares:
+        - name: kubevirt-manager-ui-auth
+      services:
+        - kind: Service
+          name: kubevirt-manager
+          port: 8080
+  tls:
+    secretName: kubevirt-manager-ui-tls-cert

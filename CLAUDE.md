@@ -71,7 +71,7 @@ adminTasks/              # Bootstrap and rendering scripts
 
 Each subdirectory is a self-contained component:
 argocd, cert-manager, cilium, cluster-wide, cnpg, csi-snapshot-controller, external-dns,
-gitea, gitea-runners, longhorn, metrics-server, nidhogg, reloader, spegel, talos, traefik
+gitea, gitea-runners, kubevirt,kubevirt-manager, cdi, longhorn, metrics-server, nidhogg, reloader, spegel, talos, traefik
 
 ## Templating System
 
@@ -322,7 +322,7 @@ These patches are deep-merged (patch wins) into the generated machine config dur
 ### Example — Disable hugepages on Raspberry Pi nodes
 
 ```yaml
-# overlays/tuborgnetes/talos/nodes/brew-10.yaml
+# overlays/${SOME_OVERLAY}/talos/nodes/brew-10.yaml
 machine:
   sysctls:
     vm.nr_hugepages: "0"

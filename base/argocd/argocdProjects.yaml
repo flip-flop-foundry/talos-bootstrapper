@@ -26,6 +26,9 @@ spec:
     - "${SMB_CSI_NAMESPACE}"
     - "${SPEGEL_NAMESPACE}"
     - "${NIDHOGG_NAMESPACE}"
+    - "${KUBEVIRT_NAMESPACE}"
+    - "${KUBEVIRT_MANAGER_NAMESPACE}"
+    - "${CDI_NAMESPACE}"
   destinations:
     - namespace: '*'
       server: '*'
@@ -73,6 +76,12 @@ spec:
     - namespace: "!${SPEGEL_NAMESPACE}"
       server: '*'
     - namespace: "!${NIDHOGG_NAMESPACE}"
+      server: '*'
+    - namespace: "!${KUBEVIRT_NAMESPACE}"
+      server: '*'
+    - namespace: "!${KUBEVIRT_MANAGER_NAMESPACE}"
+      server: '*'
+    - namespace: "!${CDI_NAMESPACE}"
       server: '*'
   namespaceResourceBlacklist:
   - group: '*'

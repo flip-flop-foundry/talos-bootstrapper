@@ -12,7 +12,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: spegel
-  namespace: ${ARGOCD_NAMESPACE}
+  namespace: ${SPEGEL_NAMESPACE}
   annotations:
     # sync-wave only affects ordering within an ArgoCD app-of-apps sync; it has no effect
     # when Applications are applied directly via kubectl (as in cluster-bootstrap.sh).
