@@ -75,37 +75,6 @@ kubectl get kubevirt -n kubevirt -o yaml
 kubectl get kubevirt kubevirt -n kubevirt -o jsonpath='{.status.phase}'
 ```
 
-### Live migration test resources
-
-The `tuborgnetes` overlay contains sample resources for live migration testing:
-
-- `overlays/tuborgnetes/kubevirt/kubevirtLiveMigrationTestPvc.yaml`
-- `overlays/tuborgnetes/kubevirt/kubevirtLiveMigrationTestVm.yaml`
-
-The sample VM is configured with `evictionStrategy: LiveMigrate` and mounts a Longhorn RWX migratable block PVC.
-
-To test migration manually:
-
-```bash
-# Check that the test VMI is marked live-migratable
-kubectl get vmi kubevirt-live-migration-test -n kubevirt -o jsonpath='{.status.conditions[?(@.type=="LiveMigratable")].status}'
-
-# Trigger a migration
-cat <<'EOF' | kubectl apply -f -
-apiVersion: kubevirt.io/v1
-kind: VirtualMachineInstanceMigration
-metadata:
-  name: kubevirt-live-migration-test-migration
-  namespace: kubevirt
-spec:
-  vmiName: kubevirt-live-migration-test
-EOF
-
-# Observe migration progress and source/target nodes
-kubectl get vmi kubevirt-live-migration-test -n kubevirt -o yaml
-```
-
-You can also verify drain behavior by cordoning and draining the node currently hosting the VM.
 
 ### Creating a VM
 

@@ -71,7 +71,7 @@ adminTasks/              # Bootstrap and rendering scripts
 
 Each subdirectory is a self-contained component:
 argocd, cert-manager, cilium, cluster-wide, cnpg, csi-snapshot-controller, external-dns,
-gitea, gitea-runners, kubevirt, longhorn, metrics-server, nidhogg, reloader, spegel, talos, traefik
+gitea, gitea-runners, kubevirt,kubevirt-manager, cdi, longhorn, metrics-server, nidhogg, reloader, spegel, talos, traefik
 
 ## Templating System
 

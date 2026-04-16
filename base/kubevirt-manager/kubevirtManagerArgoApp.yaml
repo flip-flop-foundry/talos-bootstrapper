@@ -1,8 +1,15 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${CDI_NAMESPACE}
+  labels:
+    initial-deploy-with-kubectl: "true"
+---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: kubevirt-manager
-  namespace: ${ARGOCD_NAMESPACE}
+  namespace: ${KUBEVIRT_MANAGER_NAMESPACE}
   annotations:
     argocd.argoproj.io/sync-wave: "8"
 spec:
@@ -16,7 +23,6 @@ spec:
       selfHeal: true
     syncOptions:
       - ServerSideApply=true
-      - CreateNamespace=true
     retry:
       limit: 10
       backoff:

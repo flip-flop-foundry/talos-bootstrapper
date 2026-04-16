@@ -27,6 +27,8 @@ spec:
     - "${SPEGEL_NAMESPACE}"
     - "${NIDHOGG_NAMESPACE}"
     - "${KUBEVIRT_NAMESPACE}"
+    - "${KUBEVIRT_MANAGER_NAMESPACE}"
+    - "${CDI_NAMESPACE}"
   destinations:
     - namespace: '*'
       server: '*'
