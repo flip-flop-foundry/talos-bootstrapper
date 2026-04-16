@@ -322,7 +322,7 @@ These patches are deep-merged (patch wins) into the generated machine config dur
 ### Example — Disable hugepages on Raspberry Pi nodes
 
 ```yaml
-# overlays/tuborgnetes/talos/nodes/brew-10.yaml
+# overlays/${SOME_OVERLAY}//talos/nodes/brew-10.yaml
 machine:
   sysctls:
     vm.nr_hugepages: "0"

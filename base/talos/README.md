@@ -24,7 +24,7 @@ These patches are deep-merged (patch wins) into the generated machine config **a
 Example — disable hugepages on a memory-constrained Raspberry Pi node:
 
 ```yaml
-# overlays/tuborgnetes/talos/nodes/brew-10.yaml
+# overlays/${SOME_OVERLAY}//talos/nodes/brew-10.yaml
 machine:
   sysctls:
     vm.nr_hugepages: "0"
