@@ -544,7 +544,19 @@ push_to_gitea_cluster_services() {
         log_info "Pushing working state to Gitea..."
         
         # Create temporary directory
-        local temp_repo_dir=$(mktemp -d -t "${TEMP_DIR_PREFIX:-gitea-bootstrap}")
+        local temp_repo_dir=""
+        local temp_dir_prefix="${TEMP_DIR_PREFIX:-gitea-bootstrap}"
+
+        # GNU mktemp requires a template with XXXXXX; BSD mktemp (macOS) supports -t <prefix>.
+        # Try GNU-compatible form first, then BSD-compatible form.
+        temp_repo_dir=$(mktemp -d "${TMPDIR:-/tmp}/${temp_dir_prefix}.XXXXXX" 2>/dev/null) || \
+            temp_repo_dir=$(mktemp -d -t "$temp_dir_prefix" 2>/dev/null) || true
+
+        if [[ -z "$temp_repo_dir" || ! -d "$temp_repo_dir" ]]; then
+            log_error "Failed to create temporary directory for repository copy"
+            return 1
+        fi
+
         GIT_TEMP_DIR="$temp_repo_dir"
         
         log_info "Creating temporary repository copy in: $temp_repo_dir"

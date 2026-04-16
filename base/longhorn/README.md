@@ -45,8 +45,19 @@ The cluster defines several storage classes for different use cases:
 | Storage Class | Replicas | Retain Policy | Use Case |
 |---------------|----------|---------------|---------|
 | `pvckey-2replica-retained-backedup-ssd-cp` | 2 | Retain | Database volumes (CNPG) |
+| `globalenc-2replica-retained-backedup-rwx-migratable-wn` | 2 | Retain | KubeVirt RWX block volumes with Longhorn migratable support |
 
 Check the `storage-classes.yaml` file for the full list.
+
+### KubeVirt live migration test storage
+
+For KubeVirt live migration tests, use:
+
+- access mode: `ReadWriteMany`
+- volume mode: `Block`
+- storage class: `globalenc-2replica-retained-backedup-rwx-migratable-wn`
+
+This storage class enables Longhorn `migratable: "true"` and uses the global encryption key in the same pattern as existing `globalenc-*` classes.
 
 ### Backup configuration
 

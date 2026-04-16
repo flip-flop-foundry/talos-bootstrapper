@@ -1,26 +1,28 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: $CERT_MGR_NAMESPACE
+  name: ${CDI_NAMESPACE}
   labels:
     initial-deploy-with-kubectl: "true"
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: cert-manager
-  namespace: $CERT_MGR_NAMESPACE
+  name: cdi
+  namespace: ${CDI_NAMESPACE}
   annotations:
-      argocd.argoproj.io/sync-wave: "-30"
+    argocd.argoproj.io/sync-wave: "7"
 spec:
   project: cluster-services
   destination:
+    namespace: ${CDI_NAMESPACE}
     server: https://kubernetes.default.svc
-    namespace: $CERT_MGR_NAMESPACE
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
     retry:
       limit: 10
       backoff:
@@ -28,13 +30,6 @@ spec:
         factor: 2
         maxDuration: 10m
   sources:
-    - chart: cert-manager
-      repoURL: quay.io/jetstack/charts
-      targetRevision: ${CERT_MGR_HELM_VERSION}
-      helm:
-        releaseName: cert-manager
-        valueFiles:
-          - $values/_rendered/cert-manager/certManagerValues.yaml
-    - repoURL: $GITEA_CLUSTER_SERVICES_REPO_URL
+    - repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
-      ref: values
+      path: rendered/${OVERLAY_NAME}/cdi

@@ -446,3 +446,46 @@ parameters:
     ]'
 provisioner: driver.longhorn.io
 reclaimPolicy: Retain
+
+---
+kind: StorageClass
+apiVersion: storage.k8s.io/v1
+metadata:
+  name: globalenc-2replica-retained-backedup-rwx-migratable-wn
+  annotations:
+    field.cattle.io/description: Uses global encryption key. Retains volumes. 2 Replicas, backed up daily, RWX migratable block volume, workernode
+allowVolumeExpansion: true
+parameters:
+  csi.storage.k8s.io/provisioner-secret-name: "longhorn-luks-global-key"
+  csi.storage.k8s.io/provisioner-secret-namespace: "longhorn-system"
+  csi.storage.k8s.io/node-publish-secret-name: "longhorn-luks-global-key"
+  csi.storage.k8s.io/node-publish-secret-namespace: "longhorn-system"
+  csi.storage.k8s.io/node-stage-secret-name: "longhorn-luks-global-key"
+  csi.storage.k8s.io/node-stage-secret-namespace: "longhorn-system"
+  csi.storage.k8s.io/node-expand-secret-name: "longhorn-luks-global-key"
+  csi.storage.k8s.io/node-expand-secret-namespace: "longhorn-system"
+  encrypted: "true"
+  migratable: "true"
+  fromBackup: ""
+  numberOfReplicas: "2"
+  replicaAutoBalance: "least-effort"
+  staleReplicaTimeout: "2880"
+  dataLocality: "best-effort"
+  diskSelector: "ssd"
+  nodeSelector: "workernode"
+  recurringJobSelector: '[
+    {
+    "name":"${LONGHORN_BACKUP_JOB_NAME}",
+    "isGroup":false
+    },
+    {
+    "name":"fstrim-all",
+    "isGroup":false
+    },
+    {
+    "name":"delete-excessive-snapshots-daily",
+    "isGroup":false
+    }
+    ]'
+provisioner: driver.longhorn.io
+reclaimPolicy: Retain
