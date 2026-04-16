@@ -26,6 +26,6 @@ In short: Longhorn stores the bytes, CDI manages how VM disk bytes are created a
 This repo uses a conservative default:
 
 - Base CDI CR pins infra/workload placement to Linux nodes.
-- The `tuborgnetes` overlay additionally excludes nodes `brew-10` through `brew-17` from CDI infra/workload placement.
+- Cluster-specific overlays can further tighten placement rules if a given environment needs CDI workloads kept off particular nodes.
 
-This mirrors the existing strategy used for KubeVirt workload scheduling in `tuborgnetes`.
+This keeps the base configuration portable while still allowing stricter scheduling in downstream cluster overlays.

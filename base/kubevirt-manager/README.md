@@ -41,11 +41,8 @@ Username is `admin`.
 
 ### Short runbook: KubeVirt + Longhorn live migration test
 
-1. Render and apply:
+1. Render and apply using one of the example overlays included in this repo (shown here with `yourCluster-l2`; use `yourCluster-bgp` if that matches your setup):
 
-```bash
-./adminTasks/render-overlay.sh overlays/tuborgnetes/tuborgnetes.env
-./adminTasks/cluster-bootstrap.sh overlays/tuborgnetes/tuborgnetes.env
 ```
 
 2. Verify core components:

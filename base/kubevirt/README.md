@@ -160,7 +160,7 @@ For production access, treat VNC/noVNC endpoints as privileged operations and pr
 
 ### Future enhancements
 
-- **CDI (Containerized Data Importer)** — for importing VM disk images and managing DataVolumes. Can be added as a separate component.
+- **CDI (Containerized Data Importer)** — an optional companion component for importing VM disk images and managing DataVolumes when your KubeVirt workloads need image import workflows.
 - **Multus** — for attaching VMs to additional networks (bridge, SR-IOV).
 - **Snapshot/restore** — KubeVirt supports VM snapshots via the CSI snapshot controller already deployed in this cluster.
 

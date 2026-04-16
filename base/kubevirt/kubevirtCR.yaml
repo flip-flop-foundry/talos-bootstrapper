@@ -2,7 +2,9 @@ apiVersion: kubevirt.io/v1
 kind: KubeVirt
 metadata:
   name: kubevirt
-  namespace: ${KUBEVIRT_NAMESPACE}
+  # The upstream KubeVirt operator manifests use the default `kubevirt` namespace.
+  # Keep this CR in the same namespace unless the operator manifests are also rewritten.
+  namespace: kubevirt
   annotations:
     argocd.argoproj.io/sync-wave: "2" # Deploy after operator CRDs are available
 spec:
