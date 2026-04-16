@@ -79,6 +79,10 @@ spec:
       server: '*'
     - namespace: "!${KUBEVIRT_NAMESPACE}"
       server: '*'
+    - namespace: "!${KUBEVIRT_MANAGER_NAMESPACE}"
+      server: '*'
+    - namespace: "!${CDI_NAMESPACE}"
+      server: '*'
   namespaceResourceBlacklist:
   - group: '*'
     kind: '*'

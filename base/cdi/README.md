@@ -26,3 +26,6 @@ In short: Longhorn stores the bytes, CDI manages how VM disk bytes are created a
 This repo uses a conservative default:
 
 - Base CDI CR pins infra/workload placement to Linux nodes.
+- Cluster-specific overlays can further tighten placement rules if a given environment needs CDI workloads kept off particular nodes.
+
+This keeps the base configuration portable while still allowing stricter scheduling in downstream cluster overlays.
