@@ -1,3 +1,4 @@
+#TODO See if this new chart can be used: https://gitea.com/gitea/helm-actions
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
