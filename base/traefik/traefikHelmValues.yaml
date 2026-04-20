@@ -33,20 +33,22 @@ ports:
     expose:
       default: true
     exposedPort: 80
-    # Global HTTP → HTTPS redirect. Implemented as a lowest-priority catch-all router,
-    # so any explicit IngressRoute/Ingress on the 'web' entrypoint will take precedence
-    # and bypass this redirect (opt-out by defining an explicit HTTP route).
-    redirections:
-      entryPoint:
-        to: websecure
-        scheme: https
-        permanent: true
+    http:
+      # Global HTTP → HTTPS redirect. Implemented as a lowest-priority catch-all router,
+      # so any explicit IngressRoute/Ingress on the 'web' entrypoint will take precedence
+      # and bypass this redirect (opt-out by defining an explicit HTTP route).
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
   websecure:
     expose:
       default: true
     exposedPort: 443
-    tls:
-      enabled: true
+    http:
+      tls:
+        enabled: true
 
 # Enforce TLS 1.2+ and forward-secrecy-only cipher suites cluster-wide.
 # The 'default' TLSOption applies to all routes that don't reference their own option.

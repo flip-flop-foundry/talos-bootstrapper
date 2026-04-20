@@ -12,6 +12,13 @@ spec:
   destination:
     namespace: kube-system
     server: https://kubernetes.default.svc
+  ignoreDifferences:
+    # Cilium mutates generated EndpointSlices by adding endpoint conditions at runtime.
+    # Ignore that controller-owned field so the Application does not stay OutOfSync.
+    - group: discovery.k8s.io
+      kind: EndpointSlice
+      jqPathExpressions:
+        - .endpoints[]?.conditions
   syncPolicy:
     automated:
       prune: true

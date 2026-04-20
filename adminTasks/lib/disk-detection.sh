@@ -41,11 +41,13 @@ detect_node_disks() {
         if ! disks_json=$("${talosctl_cmd[@]}" get disks --nodes "$node" --endpoints "$node" --insecure -o json 2>&1 | grep -v '^WARNING:' | sed "$normalize_hex"); then
             log_error "Failed to query disks from node $node (even with --insecure)"
             log_error "Error: $disks_json"
+            log_error "Command used: ${talosctl_cmd[*]} get disks --nodes $node --endpoints $node --insecure -o json"
             return 1
         fi
     else
         log_error "Failed to query disks from node $node"
         log_error "Error: $error_output"
+        log_error "Command used: ${talosctl_cmd[*]} get disks --nodes $node --endpoints $node -o json"
         return 1
     fi
 

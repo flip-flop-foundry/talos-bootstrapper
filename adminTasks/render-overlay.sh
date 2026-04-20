@@ -207,6 +207,8 @@ get_file_info() {
 }
 
 # Check if a component or file is excluded via EXCLUDED_BASE
+# Exclusions are matched against the rendered output path, regardless of whether
+# the source comes from base/, overlays/, or a merge of both.
 is_excluded() {
     local component="$1"
     local filename="$2"
@@ -365,16 +367,11 @@ process_files() {
     all_keys=(${(o)all_keys})
 
     # Remove rendered output for entries that are now excluded (cleanup from previous renders)
-    # Only remove if the file is base-only and excluded (overlay-only files are always kept)
     if [[ "$dry_run" == "false" ]]; then
         for key in "${all_keys[@]}"; do
             local component="${key%%|*}"
             local filename="${key#*|}"
-            local base_file="${base_map[$key]:-}"
-            local overlay_file="${overlay_map[$key]:-}"
-            
-            # Only clean up if: base exists, overlay doesn't exist, and base is excluded
-            if [[ -n "$base_file" && -z "$overlay_file" ]] && is_excluded "$component" "$filename"; then
+            if is_excluded "$component" "$filename"; then
                 local target="$output_dir/$component/$filename"
                 [[ -f "$target" ]] && rm -f "$target"
             fi
@@ -394,38 +391,20 @@ process_files() {
         local base_file="${base_map[$key]:-}"
         local overlay_file="${overlay_map[$key]:-}"
         
-        # Check if base file is excluded
-        local base_excluded=false
-        if [[ -n "$base_file" ]] && is_excluded "$component" "$filename"; then
-            base_excluded=true
+        if is_excluded "$component" "$filename"; then
+            log_info "[$file_number/${#all_keys[@]}] Skipping: $component/$filename (excluded)"
+            excluded_count=$((excluded_count + 1))
+            continue
         fi
         
         if [[ -n "$base_file" && -n "$overlay_file" ]]; then
-            # Both base and overlay exist
-            if [[ "$base_excluded" == "true" ]]; then
-                # Base is excluded, but overlay exists: render only overlay (overlay replaces base entirely)
-                log_info "[$file_number/${#all_keys[@]}] Rendering: $component/$filename (overlay only, base excluded)"
-                if render_yaml "$overlay_file" "$output_file" "$dry_run"; then
-                    overlay_only_count=$((overlay_only_count + 1))
-                else
-                    log_warn "Render failed, skipping"
-                fi
+            log_info "[$file_number/${#all_keys[@]}] Merging: $component/$filename (base + overlay)"
+            if merge_yaml_files "$base_file" "$overlay_file" "$output_file" "$dry_run"; then
+                merged_count=$((merged_count + 1))
             else
-                # Base is not excluded: merge with overlay winning
-                log_info "[$file_number/${#all_keys[@]}] Merging: $component/$filename (base + overlay)"
-                if merge_yaml_files "$base_file" "$overlay_file" "$output_file" "$dry_run"; then
-                    merged_count=$((merged_count + 1))
-                else
-                    log_warn "Merge failed, skipping"
-                fi
+                log_warn "Merge failed, skipping"
             fi
         elif [[ -n "$base_file" ]]; then
-            # Base only
-            if [[ "$base_excluded" == "true" ]]; then
-                log_info "[$file_number/${#all_keys[@]}] Skipping: $component/$filename (base excluded)"
-                excluded_count=$((excluded_count + 1))
-                continue
-            fi
             log_info "[$file_number/${#all_keys[@]}] Rendering: $component/$filename (base)"
             if render_yaml "$base_file" "$output_file" "$dry_run"; then
                 base_only_count=$((base_only_count + 1))
@@ -433,7 +412,6 @@ process_files() {
                 log_warn "Render failed, skipping"
             fi
         elif [[ -n "$overlay_file" ]]; then
-            # Overlay only: always render overlay files, never exclude them
             log_info "[$file_number/${#all_keys[@]}] Rendering: $component/$filename (overlay)"
             if render_yaml "$overlay_file" "$output_file" "$dry_run"; then
                 overlay_only_count=$((overlay_only_count + 1))
