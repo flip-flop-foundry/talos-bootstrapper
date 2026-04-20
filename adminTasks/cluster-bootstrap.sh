@@ -296,14 +296,31 @@ log_info "Rendering overlay manifests..."
 
 
 
-log_info "Installing/Upgrading ArgoCD with Helm with final values..."
-helm upgrade argocd argo/argo-cd \
-  --install \
+log_info "Checking if ArgoCD Helm release needs upgrading..."
+helm diff upgrade argocd argo/argo-cd \
+  --detailed-exitcode \
+  --no-hooks \
+  --suppress-secrets \
   --namespace "argocd" \
-  --create-namespace \
   --version "$ARGOCD_HELM_VERSION" \
-  --wait \
-  --values "$RENDERED_OVERLAY_DIR/argocd/argocdHelmValues.yaml"
+  --values "$RENDERED_OVERLAY_DIR/argocd/argocdHelmValues.yaml" \
+  && argocd_diff_exit=0 || argocd_diff_exit=$?
+
+if [[ $argocd_diff_exit -eq 0 ]]; then
+  log_info "ArgoCD already up to date, skipping upgrade."
+elif [[ $argocd_diff_exit -eq 2 ]]; then
+  log_info "Changes detected, installing/upgrading ArgoCD with Helm..."
+  helm upgrade argocd argo/argo-cd \
+    --install \
+    --namespace "argocd" \
+    --create-namespace \
+    --version "$ARGOCD_HELM_VERSION" \
+    --wait \
+    --values "$RENDERED_OVERLAY_DIR/argocd/argocdHelmValues.yaml"
+else
+  log_error "helm diff failed with unexpected exit code $argocd_diff_exit"
+  exit 1
+fi
 
 # ============================================================================
 # PUSH TO GITEA AND FINAL DEPLOYMENT

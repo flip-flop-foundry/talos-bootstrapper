@@ -67,6 +67,8 @@ ingressController:
 
 #Needed or else ArgoCD will show resources as OutOfSync permanently
 hubble:
+  peerService:
+    servicePort: 443
   ui:
     enabled: true
     tolerations:
