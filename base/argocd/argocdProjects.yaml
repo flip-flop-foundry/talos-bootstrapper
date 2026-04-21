@@ -83,6 +83,6 @@ spec:
       server: '*'
     - namespace: "!${CDI_NAMESPACE}"
       server: '*'
-  namespaceResourceBlacklist:
+  namespaceResourceWhitelist:
   - group: '*'
     kind: '*'

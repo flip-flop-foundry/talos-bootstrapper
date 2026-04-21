@@ -22,24 +22,28 @@ spec:
   basicAuth:
     secret: kubevirt-manager-ui-auth-secret
 ---
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
+apiVersion: networking.k8s.io/v1
+kind: Ingress
 metadata:
   name: kubevirt-manager-ui
   namespace: ${KUBEVIRT_MANAGER_NAMESPACE}
   annotations:
     advertise-via-dns: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: ${KUBEVIRT_MANAGER_NAMESPACE}-kubevirt-manager-ui-auth@kubernetescrd
 spec:
-  entryPoints:
-    - websecure
-  routes:
-    - kind: Rule
-      match: Host(`kubevirt-manager.${CLUSTER_EXTERNAL_DOMAIN}`)
-      middlewares:
-        - name: kubevirt-manager-ui-auth
-      services:
-        - kind: Service
-          name: kubevirt-manager
-          port: 8080
+  ingressClassName: traefik
+  rules:
+    - host: kubevirt-manager.${CLUSTER_EXTERNAL_DOMAIN}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kubevirt-manager
+                port:
+                  number: 8080
   tls:
-    secretName: kubevirt-manager-ui-tls-cert
+    - hosts:
+        - kubevirt-manager.${CLUSTER_EXTERNAL_DOMAIN}
+      secretName: kubevirt-manager-ui-tls-cert
