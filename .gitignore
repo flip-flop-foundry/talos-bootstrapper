@@ -1,3 +1,4 @@
 .DS_Store
 .vscode/current/kubeconfig
+.vscode/current/*.kubeconfig
 .vscode/current/talosconfig

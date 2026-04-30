@@ -7,6 +7,12 @@ spec:
     featureGates:
       - HonorWaitForFirstConsumer
       - WebhookPvcRendering
+    # Scratch space is a temporary PVC CDI uses during import (QCOW2→raw conversion etc.)
+    # and is deleted once the import completes. Default is to inherit the target PVC's storage
+    # class — which for emby-rootdisk is the expensive globalenc-2replica-retained class.
+    # Using a cheap non-replicated non-retained class avoids wasting storage on a throwaway volume.
+    # See: https://github.com/kubevirt/containerized-data-importer/blob/main/doc/scratch-space.md
+    scratchSpaceStorageClass: globalenc-1replica-notretained
   imagePullPolicy: IfNotPresent
   infra:
     nodeSelector:

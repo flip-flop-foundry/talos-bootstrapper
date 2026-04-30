@@ -31,7 +31,7 @@ if [ -z "$first_node" ] || [ "$first_node" = "null" ]; then
   exit 1
 fi
 
-talosctl --talosconfig "$active_dir/talosconfig" kubeconfig "$active_dir/kubeconfig" --nodes "$first_node" --merge
+talosctl --talosconfig "$active_dir/talosconfig" kubeconfig "$active_dir/${OVERLAY_NAME}.kubeconfig" --nodes "$first_node" --force
 
 argocd_namespace="${ARGOCD_NAMESPACE:-argocd}"
 argocd_domain="${ARGOCD_DOMAIN:-}"

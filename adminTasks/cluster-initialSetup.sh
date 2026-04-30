@@ -25,11 +25,16 @@ set -euo pipefail
 # ============================================================================
 
 DIFF_MODE=false
+TALOS_APPLY_MODE=""
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --diff)
       DIFF_MODE=true
+      shift
+      ;;
+    --talos-apply-mode=*)
+      TALOS_APPLY_MODE="${1#--talos-apply-mode=}"
       shift
       ;;
     *)
@@ -40,7 +45,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ${#POSITIONAL[@]} -ne 1 ]]; then
-  echo "Usage: $0 [--diff] <config-file>"
+  echo "Usage: $0 [--diff] [--talos-apply-mode=auto|staged|no-reboot] <config-file>"
   exit 1
 fi
 
@@ -411,9 +416,9 @@ for NODE in "${TALOS_CONTROL_NODES[@]}"; do
   NODE_CONFIG_FILE="$RENDERED_DIR/talos/controlplane-${NODE_HOSTNAME}.yaml"
   
   log_info "  Applying Talos config to controlplane node $NODE from $NODE_CONFIG_FILE..."
-  apply_talos_config "$NODE" "$NODE_CONFIG_FILE" "$DIFF_MODE"
+  apply_talos_config "$NODE" "$NODE_CONFIG_FILE" "$DIFF_MODE" "$TALOS_APPLY_MODE"
 
-  if [[ "$DIFF_MODE" != "true" ]]; then 
+  if [[ "$DIFF_MODE" != "true" && "$TALOS_APPLY_MODE" != "staged" ]]; then
     wait_for_node_ready "$NODE" "${PREPARING_TIMEOUT:-300}" || exit 4
   fi
 done
@@ -554,7 +559,7 @@ if [ ${#TALOS_WORKER_NODES[@]} -gt 0 ]; then
       NODE_CONFIG_FILE="$RENDERED_DIR/talos/worker-${NODE_HOSTNAME}.yaml"
       
       log_info "  Applying config to worker node $NODE from $NODE_CONFIG_FILE..."
-      apply_talos_config "$NODE" "$NODE_CONFIG_FILE"
+      apply_talos_config "$NODE" "$NODE_CONFIG_FILE" "false" "$TALOS_APPLY_MODE"
     done
     
     log_success "Worker nodes deployed successfully."

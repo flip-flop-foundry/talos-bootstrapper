@@ -281,13 +281,68 @@ merge_yaml_files() {
         cp "$overlay_file" "$overlay_rendered"
     fi
     
-    # Merge with yq (overlay file second means it takes precedence)
-    if ! yq eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' \
-        "$base_rendered" "$overlay_rendered" > "$output_file" 2>/dev/null; then
-        log_error "yq merge failed for $base_file + $overlay_file"
-        # Cleanup temp files
-        rm -f "$base_rendered" "$overlay_rendered"
-        return 1
+    # Count documents in the base file to decide merge strategy
+    local base_doc_count
+    base_doc_count=$(yq e 'di + 1' "$base_rendered" 2>/dev/null | tail -1)
+    base_doc_count=${base_doc_count:-1}
+
+    if [[ "$base_doc_count" -le 1 ]]; then
+        # Single-document file: simple merge (original behaviour, works for Helm values etc.)
+        if ! yq eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' \
+            "$base_rendered" "$overlay_rendered" > "$output_file" 2>/dev/null; then
+            log_error "yq merge failed for $base_file + $overlay_file"
+            rm -f "$base_rendered" "$overlay_rendered"
+            return 1
+        fi
+    else
+        # Multi-document base: split into individual documents, match each by kind+metadata.name
+        # against the overlay, merge matched pairs, pass unmatched base docs through unchanged,
+        # then concatenate everything back together.
+        : > "$output_file"
+        local first_doc=true
+        local base_doc overlay_match merged_doc kind name
+        for (( i=0; i<base_doc_count; i++ )); do
+            base_doc=$(mktemp)
+            overlay_match=$(mktemp)
+            merged_doc=$(mktemp)
+
+            # Extract document i from base
+            yq e "select(di == $i)" "$base_rendered" > "$base_doc" 2>/dev/null
+
+            # Get kind and name for matching
+            kind=$(yq e '.kind // ""' "$base_doc" 2>/dev/null)
+            name=$(yq e '.metadata.name // ""' "$base_doc" 2>/dev/null)
+
+            # Find matching document in overlay (match by kind + metadata.name)
+            yq e "select(.kind == \"$kind\" and .metadata.name == \"$name\")" \
+                "$overlay_rendered" > "$overlay_match" 2>/dev/null
+
+            if [[ -s "$overlay_match" ]]; then
+                # Matching overlay doc found: merge (overlay wins)
+                yq eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' \
+                    "$base_doc" "$overlay_match" > "$merged_doc" 2>/dev/null \
+                    || cp "$base_doc" "$merged_doc"
+            else
+                # No match: keep base document unchanged
+                cp "$base_doc" "$merged_doc"
+            fi
+
+            # Append to output with document separator between docs
+            if [[ "$first_doc" == "true" ]]; then
+                cat "$merged_doc" >> "$output_file"
+                first_doc=false
+            else
+                printf '\n---\n' >> "$output_file"
+                cat "$merged_doc" >> "$output_file"
+            fi
+
+            rm -f "$base_doc" "$overlay_match" "$merged_doc"
+        done
+
+        if [[ "$first_doc" == "true" ]]; then
+            # Nothing was written (base_doc_count was 0 somehow); fall back to base only
+            cp "$base_rendered" "$output_file"
+        fi
     fi
     
     # Cleanup temp files

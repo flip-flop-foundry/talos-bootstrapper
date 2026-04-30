@@ -27,6 +27,11 @@ machine:
   # Talos enables discard_unpacked_layers by default, which prevents Spegel from
   # serving cached image layers to peers. This must be disabled explicitly.
   # Spegel itself writes per-registry mirror configs to /etc/cri/conf.d/hosts.
+  #
+  # device_ownership_from_security_context — required for KubeVirt/CDI Block volume imports.
+  # Without this, containerd creates block device nodes as root:root 0660; non-root CDI
+  # importer pods cannot open /dev/cdi-block-volume and fail immediately with EACCES.
+  # See base/kubevirt/README.md for full diagnosis.
   files:
     - path: /etc/cri/conf.d/20-customization.part
       permissions: 0o644
@@ -34,6 +39,9 @@ machine:
       content: |
         [plugins."io.containerd.cri.v1.images"]
           discard_unpacked_layers = false
+
+        [plugins."io.containerd.cri.v1.runtime"]
+          device_ownership_from_security_context = true
 cluster:
   allowSchedulingOnControlPlanes: $TALOS_ALLOW_SCHEDULING_ON_CONTROLPLANES
   network:

@@ -12,6 +12,7 @@ defaultSettings:
   removeSnapshotsDuringFilesystemTrim: true
   taintToleration: "node-role.kubernetes.io/control-plane:NoSchedule"
   createDefaultDiskLabeledNodes: true # Makes Longhorn create disks, automatically only on nodes with label: "node.longhorn.io/create-default-disk=true". The disks are instead created by the auto-discover-disks job.
+  nodeDrainPolicy: block-if-contains-last-replica # Blocks drain only if node holds the last healthy replica; does not move replicas (safe for ~1h maintenance)
 persistence:
   defaultClassReplicaCount: 2
   defaultDataLocality: best-effort
