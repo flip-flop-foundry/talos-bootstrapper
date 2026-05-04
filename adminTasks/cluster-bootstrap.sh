@@ -40,18 +40,10 @@ export ENVSUBST_VARS=$(env | cut -d= -f1 | sed 's/^/\$/' | paste -sd: -)
 export SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export OVERLAY_DIR="$(cd "$(dirname "$CONFIG_FILE")" && pwd)"
 export TALOSCONFIG=$OVERLAY_DIR/talos/talosconfig
-# GIT_ROOT is the git root of the overlay (parent/cluster repo when used as a submodule).
-export GIT_ROOT="$(git -C "$OVERLAY_DIR" rev-parse --show-toplevel)"
 export LIB_DIR="$SCRIPT_DIR/lib"
-
-# Submodule-aware path detection:
-# base/ always lives in the submodule root (adminTasks/../).
-# rendered/ lives alongside overlays/ in the parent/cluster repo root.
-SUBMODULE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-PARENT_ROOT="$(git -C "$SUBMODULE_ROOT" rev-parse --show-superproject-working-tree 2>/dev/null || true)"
-[[ -z "$PARENT_ROOT" ]] && PARENT_ROOT="$SUBMODULE_ROOT"  # single-repo fallback
-export BASE_DIR="$SUBMODULE_ROOT/base"
-export RENDERED_OVERLAY_DIR="$PARENT_ROOT/rendered/$OVERLAY_NAME"
+export TALOS_SUBMODULE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+export BASE_DIR="$TALOS_SUBMODULE_ROOT/base"
+export RENDERED_OVERLAY_DIR="$OVERLAY_DIR/_rendered"
 
 export NR_OF_CONTROL_NODES=${#TALOS_CONTROL_NODES[@]}
 
@@ -71,7 +63,6 @@ log_info "Using Base Directory: $BASE_DIR"
 log_info "Using Overlay Directory: $OVERLAY_DIR"
 log_info "Using Rendered Overlay Directory: $RENDERED_OVERLAY_DIR"
 log_info "Using Talos config file: $TALOSCONFIG"
-log_info "Using Git root directory: $GIT_ROOT"
 log_info "Using Library Directory: $LIB_DIR"
 
 # ============================================================================
@@ -210,9 +201,9 @@ if [[ "$GITEA_ALREADY_BOOTSTRAPPED" == "false" ]]; then
   #kubectl apply -f "$BASE_DIR/argocd/bootstrap/bootstrapGitServer.yaml"
   kubectl wait --for=condition=Ready pod/git-bootstrap-server -n argocd
 
-  # Copy git repo to git-bootstrap-server pod
-  log_info "Copying git repo to git-bootstrap-server pod"
-  kubectl cp "$GIT_ROOT/." "argocd/git-bootstrap-server:/tmp/gitsrc"
+  # Copy overlay directory to git-bootstrap-server pod (only overlay content, not the full repo)
+  log_info "Copying overlay directory to git-bootstrap-server pod"
+  kubectl cp "$OVERLAY_DIR/." "argocd/git-bootstrap-server:/tmp/gitsrc"
   kubectl cp "$BASE_DIR/argocd/bootstrap/commitAndPush.sh" "argocd/git-bootstrap-server:/tmp/commitAndPush.sh"
   kubectl exec -n argocd git-bootstrap-server -- chmod +x /tmp/commitAndPush.sh
   kubectl exec -n argocd git-bootstrap-server -- /tmp/commitAndPush.sh
@@ -305,14 +296,31 @@ log_info "Rendering overlay manifests..."
 
 
 
-log_info "Installing/Upgrading ArgoCD with Helm with final values..."
-helm upgrade argocd argo/argo-cd \
-  --install \
+log_info "Checking if ArgoCD Helm release needs upgrading..."
+helm diff upgrade argocd argo/argo-cd \
+  --detailed-exitcode \
+  --no-hooks \
+  --suppress-secrets \
   --namespace "argocd" \
-  --create-namespace \
   --version "$ARGOCD_HELM_VERSION" \
-  --wait \
-  --values "$RENDERED_OVERLAY_DIR/argocd/argocdHelmValues.yaml"
+  --values "$RENDERED_OVERLAY_DIR/argocd/argocdHelmValues.yaml" \
+  && argocd_diff_exit=0 || argocd_diff_exit=$?
+
+if [[ $argocd_diff_exit -eq 0 ]]; then
+  log_info "ArgoCD already up to date, skipping upgrade."
+elif [[ $argocd_diff_exit -eq 2 ]]; then
+  log_info "Changes detected, installing/upgrading ArgoCD with Helm..."
+  helm upgrade argocd argo/argo-cd \
+    --install \
+    --namespace "argocd" \
+    --create-namespace \
+    --version "$ARGOCD_HELM_VERSION" \
+    --wait \
+    --values "$RENDERED_OVERLAY_DIR/argocd/argocdHelmValues.yaml"
+else
+  log_error "helm diff failed with unexpected exit code $argocd_diff_exit"
+  exit 1
+fi
 
 # ============================================================================
 # PUSH TO GITEA AND FINAL DEPLOYMENT

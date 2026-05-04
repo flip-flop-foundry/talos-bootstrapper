@@ -29,7 +29,12 @@ spec:
         duration: 20s
         factor: 2
         maxDuration: 10m
+  ignoreDifferences: #  The CDI operator controller owns and mutates its own CRDs after install — it removes the deprecated v1alpha1 
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      jsonPointers:
+        - /spec/versions
   sources:
     - repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
-      path: rendered/${OVERLAY_NAME}/cdi
+      path: _rendered/cdi

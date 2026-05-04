@@ -34,7 +34,6 @@ source "$CONFIG_FILE"
 
 export SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export OVERLAY_DIR="$(cd "$(dirname "$CONFIG_FILE")" && pwd)"
-export GIT_ROOT="$(git -C "$OVERLAY_DIR" rev-parse --show-toplevel)"
 export LIB_DIR="$SCRIPT_DIR/lib"
 
 # ============================================================================

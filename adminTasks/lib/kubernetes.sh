@@ -80,6 +80,7 @@ get_credentials_from_secret() {
 }
 
 # Create ArgoCD repo-creds secret
+# Creates a secret with the necessary fields and labels for ArgoCD to use when authenticating to Git repositories
 create_argocd_repo_creds_secret() {
     local gitea_url="$1"
     local service_account_username="$2"

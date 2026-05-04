@@ -39,6 +39,88 @@ parameters:
     ]'
 provisioner: driver.longhorn.io
 reclaimPolicy: Retain
+---
+kind: StorageClass
+apiVersion: storage.k8s.io/v1
+metadata:
+  name: nssharedkey-2replica-retained-backedup-ssd-cp
+  annotations:
+    field.cattle.io/description: Uses namespace-shared encryption key. Retains volumes. 2 Replicas, Backed Up daily, ssd, controlplane
+allowVolumeExpansion: true
+parameters:
+  csi.storage.k8s.io/provisioner-secret-name: luks-ns-shared-key
+  csi.storage.k8s.io/provisioner-secret-namespace: ${pvc.namespace}
+  csi.storage.k8s.io/node-publish-secret-name: luks-ns-shared-key
+  csi.storage.k8s.io/node-publish-secret-namespace: ${pvc.namespace}
+  csi.storage.k8s.io/node-stage-secret-name: luks-ns-shared-key
+  csi.storage.k8s.io/node-stage-secret-namespace: ${pvc.namespace}
+  csi.storage.k8s.io/node-expand-secret-name: luks-ns-shared-key
+  csi.storage.k8s.io/node-expand-secret-namespace: ${pvc.namespace}
+  diskSelector: "ssd"
+  encrypted: "true"
+  fromBackup: ""
+  numberOfReplicas: "2"
+  replicaAutoBalance: "least-effort"
+  staleReplicaTimeout: "2880"
+  dataLocality: "best-effort"
+  nodeSelector: "controlplane"
+  recurringJobSelector: '[
+    {
+    "name":"${LONGHORN_BACKUP_JOB_NAME}",
+    "isGroup":false
+    },
+    {
+    "name":"fstrim-all",
+    "isGroup":false
+    },
+    {
+    "name":"delete-excessive-snapshots-daily",
+    "isGroup":false
+    }
+    ]'
+provisioner: driver.longhorn.io
+reclaimPolicy: Retain
+---
+kind: StorageClass
+apiVersion: storage.k8s.io/v1
+metadata:
+  name: nssharedkey-2replica-retained-backedup-ssd-wn
+  annotations:
+    field.cattle.io/description: Uses namespace-shared encryption key. Retains volumes. 2 Replicas, Backed Up daily, ssd, workernode
+allowVolumeExpansion: true
+parameters:
+  csi.storage.k8s.io/provisioner-secret-name: luks-ns-shared-key
+  csi.storage.k8s.io/provisioner-secret-namespace: ${pvc.namespace}
+  csi.storage.k8s.io/node-publish-secret-name: luks-ns-shared-key
+  csi.storage.k8s.io/node-publish-secret-namespace: ${pvc.namespace}
+  csi.storage.k8s.io/node-stage-secret-name: luks-ns-shared-key
+  csi.storage.k8s.io/node-stage-secret-namespace: ${pvc.namespace}
+  csi.storage.k8s.io/node-expand-secret-name: luks-ns-shared-key
+  csi.storage.k8s.io/node-expand-secret-namespace: ${pvc.namespace}
+  diskSelector: "ssd"
+  encrypted: "true"
+  fromBackup: ""
+  numberOfReplicas: "2"
+  replicaAutoBalance: "least-effort"
+  staleReplicaTimeout: "2880"
+  dataLocality: "best-effort"
+  nodeSelector: "workernode"
+  recurringJobSelector: '[
+    {
+    "name":"${LONGHORN_BACKUP_JOB_NAME}",
+    "isGroup":false
+    },
+    {
+    "name":"fstrim-all",
+    "isGroup":false
+    },
+    {
+    "name":"delete-excessive-snapshots-daily",
+    "isGroup":false
+    }
+    ]'
+provisioner: driver.longhorn.io
+reclaimPolicy: Retain
 
 ---
 kind: StorageClass
@@ -368,6 +450,43 @@ parameters:
 kind: StorageClass
 apiVersion: storage.k8s.io/v1
 metadata:
+  name: globalenc-1replica-notretained-rwx-filesystem
+  annotations:
+    known.limitations: Causes longhorn crashes when attached to multiple nodes/pods due to https://github.com/longhorn/longhorn/issues/11510. AVOID USE UNTIL SOLVED
+    field.cattle.io/description: Uses global encryption key. Does not retain volumes, no backup. 1 Replica, RWX Filesystem — for VM root disks (CDI writes disk.img, avoids blockdev Permission Denied on Talos)
+allowVolumeExpansion: true
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
+parameters:
+  csi.storage.k8s.io/provisioner-secret-name: "longhorn-luks-global-key"
+  csi.storage.k8s.io/provisioner-secret-namespace: "longhorn-system"
+  csi.storage.k8s.io/node-publish-secret-name: "longhorn-luks-global-key"
+  csi.storage.k8s.io/node-publish-secret-namespace: "longhorn-system"
+  csi.storage.k8s.io/node-stage-secret-name: "longhorn-luks-global-key"
+  csi.storage.k8s.io/node-stage-secret-namespace: "longhorn-system"
+  csi.storage.k8s.io/node-expand-secret-name: "longhorn-luks-global-key"
+  csi.storage.k8s.io/node-expand-secret-namespace: "longhorn-system"
+  encrypted: "true"
+  migratable: "true"
+  fromBackup: ""
+  numberOfReplicas: "1"
+  staleReplicaTimeout: "2880"
+  dataLocality: "best-effort"
+  recurringJobSelector: '[
+      {
+      "name":"fstrim-all",
+      "isGroup":false
+      },
+      {
+      "name":"delete-excessive-snapshots-daily",
+      "isGroup":false
+      }
+      ]'
+
+---
+kind: StorageClass
+apiVersion: storage.k8s.io/v1
+metadata:
   name: pvckey-2replica-retained-backedup-ssd-cp
   annotations:
     field.cattle.io/description: Uses encryption key stored in secret named after pvc. Retains volumes. 2 Replicas, Backed Up daily, ssd, controlplane
@@ -453,6 +572,7 @@ apiVersion: storage.k8s.io/v1
 metadata:
   name: globalenc-2replica-retained-backedup-rwx-migratable-wn
   annotations:
+    known.limitations: Causes longhorn crashes when attached to multiple nodes/pods due to https://github.com/longhorn/longhorn/issues/11510. AVOID USE UNTIL SOLVED
     field.cattle.io/description: Uses global encryption key. Retains volumes. 2 Replicas, backed up daily, RWX migratable block volume, workernode
 allowVolumeExpansion: true
 parameters:
@@ -464,6 +584,50 @@ parameters:
   csi.storage.k8s.io/node-stage-secret-namespace: "longhorn-system"
   csi.storage.k8s.io/node-expand-secret-name: "longhorn-luks-global-key"
   csi.storage.k8s.io/node-expand-secret-namespace: "longhorn-system"
+  encrypted: "true"
+  migratable: "true"
+  fromBackup: ""
+  numberOfReplicas: "2"
+  replicaAutoBalance: "least-effort"
+  staleReplicaTimeout: "2880"
+  dataLocality: "best-effort"
+  diskSelector: "ssd"
+  nodeSelector: "workernode"
+  recurringJobSelector: '[
+    {
+    "name":"${LONGHORN_BACKUP_JOB_NAME}",
+    "isGroup":false
+    },
+    {
+    "name":"fstrim-all",
+    "isGroup":false
+    },
+    {
+    "name":"delete-excessive-snapshots-daily",
+    "isGroup":false
+    }
+    ]'
+provisioner: driver.longhorn.io
+reclaimPolicy: Retain
+
+---
+kind: StorageClass
+apiVersion: storage.k8s.io/v1
+metadata:
+  name: pvckey-2replica-retained-backedup-rwx-migratable-wn
+  annotations:
+    known.limitations: Causes longhorn crashes when attached to multiple nodes/pods due to https://github.com/longhorn/longhorn/issues/11510. AVOID USE UNTIL SOLVED
+    field.cattle.io/description: Uses encryption key stored in secret named after pvc. Retains volumes. 2 Replicas, backed up daily, RWX migratable block volume, workernode
+allowVolumeExpansion: true
+parameters:
+  csi.storage.k8s.io/provisioner-secret-name: ${pvc.name}
+  csi.storage.k8s.io/provisioner-secret-namespace: ${pvc.namespace}
+  csi.storage.k8s.io/node-publish-secret-name: ${pvc.name}
+  csi.storage.k8s.io/node-publish-secret-namespace: ${pvc.namespace}
+  csi.storage.k8s.io/node-stage-secret-name: ${pvc.name}
+  csi.storage.k8s.io/node-stage-secret-namespace: ${pvc.namespace}
+  csi.storage.k8s.io/node-expand-secret-name: ${pvc.name}
+  csi.storage.k8s.io/node-expand-secret-namespace: ${pvc.namespace}
   encrypted: "true"
   migratable: "true"
   fromBackup: ""

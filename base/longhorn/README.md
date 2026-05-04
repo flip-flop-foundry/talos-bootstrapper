@@ -44,7 +44,8 @@ The cluster defines several storage classes for different use cases:
 
 | Storage Class | Replicas | Retain Policy | Use Case |
 |---------------|----------|---------------|---------|
-| `pvckey-2replica-retained-backedup-ssd-cp` | 2 | Retain | Database volumes (CNPG) |
+| `nssharedkey-2replica-retained-backedup-ssd-wn` | 2 | Retain | Namespace-shared encrypted database volumes |
+| `pvckey-2replica-retained-backedup-ssd-cp` | 2 | Retain | Legacy per-PVC-key database volumes |
 | `globalenc-2replica-retained-backedup-rwx-migratable-wn` | 2 | Retain | KubeVirt RWX block volumes with Longhorn migratable support |
 
 Check the `storage-classes.yaml` file for the full list.

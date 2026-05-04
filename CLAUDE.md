@@ -11,11 +11,10 @@ GitOps-based Talos Kubernetes cluster bootstrapper. Automates provisioning of pr
 
 ## Usage Modes
 
-This repo supports two layouts:
+Each cluster overlay is a separate git repository, registered as a submodule inside a private **cluster repo**. Sensitive cluster configuration (passwords, CIDRs, node names) stays private; scripts and base templates remain public.
 
-### Mode A — Submodule (recommended for production)
+### Submodule Layout
 
-The repo is used as a git submodule inside a private **cluster repo**. Sensitive cluster configuration (passwords, CIDRs, node names) stays private; scripts and base templates remain public.
 
 ```
 my-cluster-repo/            # Private cluster repo
@@ -25,7 +24,7 @@ my-cluster-repo/            # Private cluster repo
 ├── overlays/               # Cluster-specific configs (private)
 │   └── mycluster/
 │       └── mycluster.env
-└── rendered/               # Gitignored output
+│       └── _rendered/       # Rendered output (inside each overlay)
 ```
 
 Scripts are invoked from the cluster repo root:
@@ -35,33 +34,17 @@ Scripts are invoked from the cluster repo root:
 
 See [talos-bootstraper-cluster-repo-example](https://github.com/flip-flop-foundry/talos-bootstraper-cluster-repo-example) for a complete working example.
 
-### Mode B — Single repo (development / simple setups)
-
-Clone this repo directly and create overlays inside it. Used for developing the bootstrapper itself (the `overlays/` directory contains reference example overlays: `yourCluster-l2/` and `yourCluster-bgp/`).
-
-```
-talos-bootstraper/
-├── adminTasks/
-├── base/
-├── overlays/
-│   ├── yourCluster-l2/     # Reference example (L2 LoadBalancer mode)
-│   └── yourCluster-bgp/    # Reference example (BGP LoadBalancer mode)
-```
-
-Scripts automatically detect which layout is active using `git rev-parse --show-superproject-working-tree`.
 
 ## Directory Structure
 
 ```
 base/                    # Component templates with ${VAR} placeholders (cluster-agnostic)
 overlays/
-  yourCluster-l2/        # Reference example: L2 LoadBalancer mode (runs in this repo only)
-  yourCluster-bgp/       # Reference example: BGP LoadBalancer mode (runs in this repo only)
-  <cluster>/             # Your cluster overlay (Mode B only — see external repo for Mode A)
+  <cluster>/              # Each overlay is a separate git submodule
+    _rendered/          # OUTPUT — final manifests after envsubst + yq merge
     <cluster>.env        # All cluster config: versions, CIDRs, domains, node lists
     talos/               # Generated Talos machine configs + secrets
       nodes/             # Optional per-node YAML patches (merged by hostname)
-rendered/                # OUTPUT (gitignored) — final manifests after envsubst + yq merge
 adminTasks/              # Bootstrap and rendering scripts
   lib/                   # Shared shell libraries (logging, k8s helpers, API clients)
   pxe/                   # iPXE network boot infrastructure (Docker-based)
@@ -84,7 +67,7 @@ gitea, gitea-runners, kubevirt,kubevirt-manager, cdi, longhorn, metrics-server, 
 
 ```
 base/<component>/*.yaml  ──┐
-                            ├──> yq merge (overlay wins) ──> envsubst ──> rendered/<cluster>/<component>/
+                            ├──> yq merge (overlay wins) ──> envsubst ──> overlays/<cluster>/_rendered/<component>/
 overlays/<cluster>/<component>/*.yaml ─┘
 ```
 
@@ -104,7 +87,7 @@ Run: `./adminTasks/render-overlay.sh overlays/<cluster>/<cluster>.env`
 
 Every ArgoCD app uses two sources:
 1. **Helm chart source** — external chart repo, pinned version via `${COMPONENT_HELM_VERSION}`
-2. **Git values source** — this repo (Gitea), with `ref: values` so helm can reference `$values/rendered/...`
+2. **Git values source** — this repo (Gitea), with `ref: values` so helm can reference `$values/_rendered/...`
 
 ```yaml
 sources:
@@ -113,10 +96,10 @@ sources:
     targetRevision: ${COMPONENT_HELM_VERSION}
     helm:
       valueFiles:
-        - $values/rendered/${OVERLAY_NAME}/<component>/<component>HelmValues.yaml
+        - $values/_rendered/<component>/<component>HelmValues.yaml
   - repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
     targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
-    path: rendered/${OVERLAY_NAME}/<component>
+    path: _rendered/<component>
     ref: values
 ```
 
@@ -174,7 +157,7 @@ Each cluster has one `.env` file exporting all configuration. Key variable group
 
 | Script | Purpose |
 |--------|---------|
-| `adminTasks/render-overlay.sh` | Template renderer: envsubst + yq merge → rendered/ |
+| `adminTasks/render-overlay.sh` | Template renderer: envsubst + yq merge → _rendered/ (inside overlay) |
 | `adminTasks/cluster-bootstrap.sh` | Full bootstrap orchestrator |
 | `adminTasks/cluster-initialSetup.sh` | Install prerequisites, generate Talos configs |
 | `adminTasks/gitea-bootstrap.sh` | Create Gitea org/repo, push code, setup ArgoCD creds |
@@ -239,7 +222,6 @@ Advertises LoadBalancer IPs via eBGP to an external router. IPs can be any routa
 - Services (Traefik, ArgoCD) are mode-agnostic — no `loadBalancerClass` needed since Cilium is the sole LB controller
 - Mode selection is purely which Cilium CRDs get rendered, controlled by `EXCLUDED_BASE`
 
-See `overlays/yourCluster-l2/` and `overlays/yourCluster-bgp/` for reference examples in this repo.
 
 ## iPXE Network Boot
 
@@ -277,7 +259,7 @@ pxe/
 
 ## How to Add a New Cluster
 
-**Submodule mode (Mode A — recommended):** Create the cluster overlay in your private cluster repo:
+Create the cluster overlay in your private cluster repo:
 
 1. Fork or clone [talos-bootstraper-cluster-repo-example](https://github.com/flip-flop-foundry/talos-bootstraper-cluster-repo-example) as your private cluster repo.
 2. Create `overlays/<cluster>/<cluster>.env` in your cluster repo (copy and customize from the example).
@@ -289,13 +271,6 @@ pxe/
 
 For detailed instructions, see the README.md in the example repo and this repo's `.github/copilot-instructions.md`.
 
-**Single-repo mode (Mode B):**
-
-1. Create `overlays/<cluster>/<cluster>.env` in this repo (copy from `overlays/yourCluster-l2/` or `overlays/yourCluster-bgp/`).
-2. Update: `OVERLAY_NAME`, `CLUSTER_EXTERNAL_DOMAIN`, CIDRs, node hostnames, versions.
-3-5. Same as Mode A above, then run scripts as `./adminTasks/<script>.sh overlays/<cluster>/<cluster>.env`.
-
-**Recommendation**: Use Mode A (submodule + external example repo) for production clusters to keep sensitive configuration private.
 
 ## Per-Node Talos Patches
 
@@ -715,7 +690,7 @@ For CNPG-backed applications, use these sync waves to ensure correct ordering:
 
 ## Important Notes
 
-- `rendered/` is gitignored — always regenerate via render-overlay.sh
+- `_rendered/` is generated inside each overlay directory — always regenerate via render-overlay.sh
 - The bootstrap uses a temporary git-bootstrap-server pod before Gitea is ready
 - Shell scripts use `set -euo pipefail` — strict error handling
 - All env vars use `export` for shell sourcing and envsubst compatibility
@@ -827,7 +802,7 @@ helm repo update
 # Render with your values file and inspect every resource
 helm template <release-name> <repo-name>/<chart-name> \
   --version <CHART_VERSION> \
-  -f rendered/<overlay>/<component>/<component>HelmValues.yaml \
+  -f overlays/<overlay>/_rendered/<component>/<component>HelmValues.yaml \
   | grep -E 'runAsNonRoot|allowPrivilegeEscalation|readOnlyRootFilesystem|capabilities|seccompProfile|automountServiceAccountToken'
 ```
 

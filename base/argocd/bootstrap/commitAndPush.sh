@@ -23,13 +23,15 @@ fi
 #   GIT_COMMIT_MSG="Commit on $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 # fi
 
+echo "Using GIT_SOURCE_DIR: $GIT_SOURCE_DIR"
+
 cd "$GIT_SOURCE_DIR" || {
   echo "Failed to change directory to GIT_SOURCE_DIR: $GIT_SOURCE_DIR"
   exit 3
 }
 
 echo "Staging all changes..."
-git add -A -f -- . ':(exclude,glob)**/adminTasks/pxe/assets/**' ':(exclude,glob).vscode/current/**'
+git add -A -f -- .
 
 
 # Ensure branch does not already exist

@@ -31,7 +31,7 @@ spec:
       helm:
         releaseName: kube-csr-approver
         valueFiles:
-          - $values/rendered/${OVERLAY_NAME}/kube-csr-approver/csrApproverHelmValues.yaml
+          - $values/_rendered/kube-csr-approver/csrApproverHelmValues.yaml
     - repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
       ref: values

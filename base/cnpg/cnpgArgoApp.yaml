@@ -36,7 +36,7 @@ spec:
       helm:
         releaseName: cnpg
         valueFiles:
-          - $values/rendered/${OVERLAY_NAME}/cnpg/cnpgValues.yaml
+          - $values/_rendered/cnpg/cnpgValues.yaml
     - repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
       ref: values

@@ -85,6 +85,11 @@ resources:
     cpu: 500m
     memory: 512Mi
 
+
+valkey-cluster:
+  enabled: false #Overkill for now
+
+
 ## @param priorityClassName Priority class for pod assignment
 priorityClassName: "cluster-services"
 

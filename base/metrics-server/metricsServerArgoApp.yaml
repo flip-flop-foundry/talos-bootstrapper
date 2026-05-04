@@ -37,7 +37,7 @@ spec:
       helm:
         releaseName: metrics-server
         valueFiles:
-          - $values/rendered/${OVERLAY_NAME}/metrics-server/metricsServerHelmValues.yaml
+          - $values/_rendered/metrics-server/metricsServerHelmValues.yaml
     - repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
       ref: values

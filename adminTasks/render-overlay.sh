@@ -6,10 +6,10 @@ set -euo pipefail
 #
 # Usage: renderer.sh <ENV_FILE> [--dry-run]
 #
-# This script loads an environment file (e.g. talos/overlays/yourCluster/yourCluster.env),
-# collects YAML files from talos/base/* (depth=1) and the overlay's immediate
+# This script loads an environment file (e.g. overlays/yourCluster/yourCluster.env),
+# collects YAML files from talos-bootstraper/base/* (depth=1) and the overlay's immediate
 # subdirectories (recursive), renders them with envsubst, merges collisions
-# (overlay wins) using yq, and outputs to talos/rendered/${OVERLAY_NAME}.
+# (overlay wins) using yq, and outputs to the overlay's _rendered/ directory.
 ################################################################################
 
 # Get script directory and load logging library
@@ -181,8 +181,8 @@ collect_overlay_files() {
         
         local component_name=$(basename "$component_dir")
         
-        # Skip rendered output directories
-        [[ "$component_name" == *"-rendered" ]] && continue
+        # Skip rendered output directory
+        [[ "$component_name" == "_rendered" ]] && continue
         
         # Find YAML files recursively in this component
         while IFS= read -r file; do
@@ -207,6 +207,8 @@ get_file_info() {
 }
 
 # Check if a component or file is excluded via EXCLUDED_BASE
+# Exclusions are matched against the rendered output path, regardless of whether
+# the source comes from base/, overlays/, or a merge of both.
 is_excluded() {
     local component="$1"
     local filename="$2"
@@ -279,13 +281,68 @@ merge_yaml_files() {
         cp "$overlay_file" "$overlay_rendered"
     fi
     
-    # Merge with yq (overlay file second means it takes precedence)
-    if ! yq eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' \
-        "$base_rendered" "$overlay_rendered" > "$output_file" 2>/dev/null; then
-        log_error "yq merge failed for $base_file + $overlay_file"
-        # Cleanup temp files
-        rm -f "$base_rendered" "$overlay_rendered"
-        return 1
+    # Count documents in the base file to decide merge strategy
+    local base_doc_count
+    base_doc_count=$(yq e 'di + 1' "$base_rendered" 2>/dev/null | tail -1)
+    base_doc_count=${base_doc_count:-1}
+
+    if [[ "$base_doc_count" -le 1 ]]; then
+        # Single-document file: simple merge (original behaviour, works for Helm values etc.)
+        if ! yq eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' \
+            "$base_rendered" "$overlay_rendered" > "$output_file" 2>/dev/null; then
+            log_error "yq merge failed for $base_file + $overlay_file"
+            rm -f "$base_rendered" "$overlay_rendered"
+            return 1
+        fi
+    else
+        # Multi-document base: split into individual documents, match each by kind+metadata.name
+        # against the overlay, merge matched pairs, pass unmatched base docs through unchanged,
+        # then concatenate everything back together.
+        : > "$output_file"
+        local first_doc=true
+        local base_doc overlay_match merged_doc kind name
+        for (( i=0; i<base_doc_count; i++ )); do
+            base_doc=$(mktemp)
+            overlay_match=$(mktemp)
+            merged_doc=$(mktemp)
+
+            # Extract document i from base
+            yq e "select(di == $i)" "$base_rendered" > "$base_doc" 2>/dev/null
+
+            # Get kind and name for matching
+            kind=$(yq e '.kind // ""' "$base_doc" 2>/dev/null)
+            name=$(yq e '.metadata.name // ""' "$base_doc" 2>/dev/null)
+
+            # Find matching document in overlay (match by kind + metadata.name)
+            yq e "select(.kind == \"$kind\" and .metadata.name == \"$name\")" \
+                "$overlay_rendered" > "$overlay_match" 2>/dev/null
+
+            if [[ -s "$overlay_match" ]]; then
+                # Matching overlay doc found: merge (overlay wins)
+                yq eval-all 'select(fileIndex == 0) * select(fileIndex == 1)' \
+                    "$base_doc" "$overlay_match" > "$merged_doc" 2>/dev/null \
+                    || cp "$base_doc" "$merged_doc"
+            else
+                # No match: keep base document unchanged
+                cp "$base_doc" "$merged_doc"
+            fi
+
+            # Append to output with document separator between docs
+            if [[ "$first_doc" == "true" ]]; then
+                cat "$merged_doc" >> "$output_file"
+                first_doc=false
+            else
+                printf '\n---\n' >> "$output_file"
+                cat "$merged_doc" >> "$output_file"
+            fi
+
+            rm -f "$base_doc" "$overlay_match" "$merged_doc"
+        done
+
+        if [[ "$first_doc" == "true" ]]; then
+            # Nothing was written (base_doc_count was 0 somehow); fall back to base only
+            cp "$base_rendered" "$output_file"
+        fi
     fi
     
     # Cleanup temp files
@@ -365,16 +422,11 @@ process_files() {
     all_keys=(${(o)all_keys})
 
     # Remove rendered output for entries that are now excluded (cleanup from previous renders)
-    # Only remove if the file is base-only and excluded (overlay-only files are always kept)
     if [[ "$dry_run" == "false" ]]; then
         for key in "${all_keys[@]}"; do
             local component="${key%%|*}"
             local filename="${key#*|}"
-            local base_file="${base_map[$key]:-}"
-            local overlay_file="${overlay_map[$key]:-}"
-            
-            # Only clean up if: base exists, overlay doesn't exist, and base is excluded
-            if [[ -n "$base_file" && -z "$overlay_file" ]] && is_excluded "$component" "$filename"; then
+            if is_excluded "$component" "$filename"; then
                 local target="$output_dir/$component/$filename"
                 [[ -f "$target" ]] && rm -f "$target"
             fi
@@ -394,38 +446,20 @@ process_files() {
         local base_file="${base_map[$key]:-}"
         local overlay_file="${overlay_map[$key]:-}"
         
-        # Check if base file is excluded
-        local base_excluded=false
-        if [[ -n "$base_file" ]] && is_excluded "$component" "$filename"; then
-            base_excluded=true
+        if is_excluded "$component" "$filename"; then
+            log_info "[$file_number/${#all_keys[@]}] Skipping: $component/$filename (excluded)"
+            excluded_count=$((excluded_count + 1))
+            continue
         fi
         
         if [[ -n "$base_file" && -n "$overlay_file" ]]; then
-            # Both base and overlay exist
-            if [[ "$base_excluded" == "true" ]]; then
-                # Base is excluded, but overlay exists: render only overlay (overlay replaces base entirely)
-                log_info "[$file_number/${#all_keys[@]}] Rendering: $component/$filename (overlay only, base excluded)"
-                if render_yaml "$overlay_file" "$output_file" "$dry_run"; then
-                    overlay_only_count=$((overlay_only_count + 1))
-                else
-                    log_warn "Render failed, skipping"
-                fi
+            log_info "[$file_number/${#all_keys[@]}] Merging: $component/$filename (base + overlay)"
+            if merge_yaml_files "$base_file" "$overlay_file" "$output_file" "$dry_run"; then
+                merged_count=$((merged_count + 1))
             else
-                # Base is not excluded: merge with overlay winning
-                log_info "[$file_number/${#all_keys[@]}] Merging: $component/$filename (base + overlay)"
-                if merge_yaml_files "$base_file" "$overlay_file" "$output_file" "$dry_run"; then
-                    merged_count=$((merged_count + 1))
-                else
-                    log_warn "Merge failed, skipping"
-                fi
+                log_warn "Merge failed, skipping"
             fi
         elif [[ -n "$base_file" ]]; then
-            # Base only
-            if [[ "$base_excluded" == "true" ]]; then
-                log_info "[$file_number/${#all_keys[@]}] Skipping: $component/$filename (base excluded)"
-                excluded_count=$((excluded_count + 1))
-                continue
-            fi
             log_info "[$file_number/${#all_keys[@]}] Rendering: $component/$filename (base)"
             if render_yaml "$base_file" "$output_file" "$dry_run"; then
                 base_only_count=$((base_only_count + 1))
@@ -433,7 +467,6 @@ process_files() {
                 log_warn "Render failed, skipping"
             fi
         elif [[ -n "$overlay_file" ]]; then
-            # Overlay only: always render overlay files, never exclude them
             log_info "[$file_number/${#all_keys[@]}] Rendering: $component/$filename (overlay)"
             if render_yaml "$overlay_file" "$output_file" "$dry_run"; then
                 overlay_only_count=$((overlay_only_count + 1))
@@ -522,42 +555,28 @@ main() {
     
     # Determine directories
     local overlay_dir=$(dirname "$env_file")
-    # Script lives in adminTasks/; parent directory is the submodule root (contains base/).
-    # When used as a git submodule the parent repo root is detected via git; rendered/ goes
-    # there so that overlays and rendered output live alongside each other in the cluster repo.
-    local submodule_root="$(cd "$SCRIPT_DIR/.." && pwd)"
+    # Script lives in adminTasks/; parent directory is the repo root (contains base/).
+    local talos_submodule_root="$(cd "$SCRIPT_DIR/.." && pwd)"
     
-    if [[ ! -d "$submodule_root/base" ]]; then
-        log_error "Could not find base directory at: $submodule_root/base"
+    if [[ ! -d "$talos_submodule_root/base" ]]; then
+        log_error "Could not find base directory at: $talos_submodule_root/base"
         exit 1
     fi
     
-    local base_dir="$submodule_root/base"
-    # Detect parent repo when running as a git submodule; fall back to submodule root
-    # for the classic single-repo layout.
-    local parent_root=""
-    if command -v git >/dev/null 2>&1; then
-        if parent_root="$(git -C "$submodule_root" rev-parse --show-superproject-working-tree 2>/dev/null)"; then
-            [[ -z "$parent_root" ]] && parent_root="$submodule_root"  # single-repo fallback
-        else
-            log_warn "Failed to detect git superproject root from $submodule_root; falling back to submodule root for rendered output."
-            parent_root="$submodule_root"
-        fi
-    else
-        log_warn "git is not installed; cannot detect git superproject root. Falling back to submodule root for rendered output."
-        parent_root="$submodule_root"
-    fi
-    local output_dir="$parent_root/rendered/${OVERLAY_NAME}"
+    local base_dir="$talos_submodule_root/base"
+    # Output rendered files into _rendered/ inside the overlay directory.
+    # This keeps rendered output co-located with the overlay config so that
+    # overlay submodules are self-contained for ArgoCD.
+    local output_dir="$overlay_dir/_rendered"
     
-    log_info "Submodule root:    $submodule_root"
-    log_info "Parent repo root:  $parent_root"
+    log_info "Repository root:   $talos_submodule_root"
     log_info "Base directory:    $base_dir"
     log_info "Overlay directory: $overlay_dir"
     log_info "Output directory:  $output_dir"
     echo ""
     
     # Process files
-    process_files "$submodule_root" "$base_dir" "$overlay_dir" "$output_dir" "$dry_run"
+    process_files "$talos_submodule_root" "$base_dir" "$overlay_dir" "$output_dir" "$dry_run"
 }
 
 main "$@"

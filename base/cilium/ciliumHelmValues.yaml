@@ -53,6 +53,13 @@ encryption:
   wireguard:
     persistentKeepalive: 5s
 
+# Explicitly set MTU to account for WireGuard IPv4 overhead (~76 bytes).
+# KubeVirt masquerade VMs read interface MTU (not route MTU) when advertising
+# TCP MSS, so without this, large packets from VMs can exceed the wire MTU
+# on inter-node WireGuard tunnels, causing hung connections for large transfers.
+# 1500 (physical) - 76 (WireGuard IPv4 overhead) = 1424
+MTU: 1424
+
 l2announcements:
   enabled: ${CILIUM_L2_ANNOUNCEMENTS_ENABLED}
 
@@ -67,6 +74,8 @@ ingressController:
 
 #Needed or else ArgoCD will show resources as OutOfSync permanently
 hubble:
+  peerService:
+    servicePort: 443
   ui:
     enabled: true
     tolerations:

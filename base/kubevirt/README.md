@@ -40,13 +40,49 @@ KubeVirt is **excluded by default** in the example overlays. To enable it:
 
 ## Talos-specific notes
 
-The existing Talos machine configuration (`base/talos/talosPatchConfig.yaml`) already includes settings that support KubeVirt:
+`base/talos/talosPatchConfig.yaml` includes settings that support KubeVirt out of the box:
 
 - **`vfio_pci`** kernel module — enables PCI device passthrough for GPU/NIC passthrough to VMs.
 - **`vm.nr_hugepages: "1024"`** — pre-allocates hugepages for VM memory performance.
 - **KVM support** — Talos Linux includes KVM kernel support by default (`kvm`, `kvm_intel`, `kvm_amd` are compiled in).
+- **Containerd changes:** - for disk imports to work containerd config changes are needed "device_ownership_from_security_context"
 
 Hardware virtualization (Intel VT-x or AMD-V) must be enabled in the node BIOS/UEFI.
+On proxmox the cpu type must be set to "host"
+
+### CDI importer failure on Talos — Block volumes and `device_ownership_from_security_context`
+
+**Symptom**: CDI importer pod crashes immediately with:
+```
+blockdev: cannot open /dev/cdi-block-volume: Permission denied
+```
+
+**Root cause**: When importing to a `volumeMode: Block` PVC, CDI runs `blockdev --getsize64 /dev/cdi-block-volume` to check the device size before starting the transfer. On Talos, containerd creates block device nodes inside the pod owned by `root:root` with mode `0660`. The CDI importer runs as a non-root user and cannot open the device, so the process fails immediately — before any data is transferred.
+
+**Fix — `device_ownership_from_security_context`**
+
+Add the following stanza to the containerd CRI runtime config:
+
+```toml
+[plugins."io.containerd.cri.v1.runtime"]
+  device_ownership_from_security_context = true
+```
+
+This instructs containerd to `chown` block device nodes inside the pod to match the pod's `runAsUser`/`runAsGroup`, making the device accessible to non-root containers. With this in place, the CDI importer can open the block device and the DataVolume import completes successfully (`Succeeded` at 100%).
+
+**Applying on Talos**
+
+On Talos this is applied via a `machine.files` drop-in at `/etc/cri/conf.d/20-customization.part`. Because `yq` deep-merge replaces arrays wholesale, an overlay `machine.files` entry must include **all** required containerd stanzas in a single file — not just the new one. The existing Spegel stanza (`discard_unpacked_layers = false`) must be carried alongside. This is handled in `base/talos/talosPatchConfig.yaml` and applies to all clusters.
+
+After applying the patch with `talosctl apply-config`, Talos triggers an automatic reboot (the CRI config cannot be reloaded in-place). Verify the file on each node after reboot:
+
+```bash
+talosctl read /etc/cri/conf.d/20-customization.part --nodes <node>
+```
+
+**Workaround if the containerd fix cannot be applied**
+
+If the patch cannot be rolled out immediately, VM disks can temporarily use `volumeMode: Filesystem` with a standard RWO storage class. CDI's filesystem import path writes a `disk.img` file via `qemu-img` and never touches block devices, so the permission error does not occur. Set `evictionStrategy: None` — live migration is not available without Block + RWX volumes.
 
 ## Dependencies
 
@@ -55,6 +91,10 @@ None beyond standard cluster infrastructure. KubeVirt uses:
 - Node-level KVM for hardware virtualization
 - Cilium for pod/VM networking (masquerade mode by default)
 - Longhorn RWX migratable block volumes for stateful VM live migration tests
+
+> **Known limitation — encrypted volumes + live migration**: Longhorn encrypted volumes (`encrypted: "true"`) are incompatible with KubeVirt live migration in Longhorn ≤ v1.11.x. During migration the CSI node plugin on the target node tries to run `cryptsetup luksOpen` on the block device while it is already open on the source node, which crashes the plugin and leaves the migration pod stuck. The `longhorn-csi-plugin` DaemonSet pod on the target node will show multiple restarts. This is tracked in [longhorn/longhorn #11510](https://github.com/longhorn/longhorn/issues/11510) and targeted for fix in Longhorn v1.12.0.
+>
+> **Workaround**: Use an unencrypted `migratable: "true"` storage class for VM volumes that need live migration. If no unencrypted migratable class exists, add one to `base/longhorn/storage-classes.yaml` (omit the `encrypted` and `csi.storage.k8s.io/*-secret-*` parameters, keep `migratable: "true"` and `accessMode: ReadWriteMany`). VMs that do not require live migration can continue to use encrypted storage.
 
 ## Dependents
 

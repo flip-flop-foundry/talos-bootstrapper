@@ -27,11 +27,11 @@ spec:
       helm:
         releaseName: cert-manager-trust
         valueFiles:
-          - $values/rendered/${OVERLAY_NAME}/cert-manager/certManagerTrustValues.yaml
+          - $values/_rendered/cert-manager/certManagerTrustValues.yaml
     - repoURL: $GITEA_CLUSTER_SERVICES_REPO_URL
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
       ref: values
-      path: rendered/${OVERLAY_NAME}/cert-manager
+      path: _rendered/cert-manager
       directory:
         recurse: false
         include: "{certManagerTrustBundle.yaml}"

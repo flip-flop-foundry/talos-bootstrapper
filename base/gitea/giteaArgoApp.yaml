@@ -47,11 +47,11 @@ spec:
       helm:
         releaseName: gitea
         valueFiles:
-          - $values/rendered/${OVERLAY_NAME}/gitea/giteaValues.yaml
+          - $values/_rendered/gitea/giteaValues.yaml
     - repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
       ref: values
-      path: rendered/${OVERLAY_NAME}/gitea
+      path: _rendered/gitea
       directory:
         recurse: false
         include: "{giteaSecretsBootstrap.yaml,giteaRunnerTokenBootstrap.yaml}"

@@ -36,11 +36,11 @@ spec:
       helm:
         releaseName: traefik
         valueFiles:
-          - $values/rendered/${OVERLAY_NAME}/traefik/traefikHelmValues.yaml
+          - $values/_rendered/traefik/traefikHelmValues.yaml
     - repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
       ref: values
-      path: rendered/${OVERLAY_NAME}/traefik
+      path: _rendered/traefik
       directory:
         recurse: false
         exclude: "{traefikHelmValues.yaml,traefikArgoApp.yaml}"

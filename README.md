@@ -62,7 +62,7 @@ base/<component>/*.yaml  ──┐
 overlays/<cluster>/<component>/*.yaml ─┘
 ```
 
-The `EXCLUDED_BASE` array in each `.env` file controls which base components or files are skipped during rendering.
+The `EXCLUDED_BASE` array in each `.env` file controls which components or files are skipped during rendering. Matching is done on the rendered output path, so it applies to base files, overlay files, and merged files.
 
 ## LoadBalancer Mode: L2 vs BGP
 

@@ -35,7 +35,7 @@ spec:
       helm:
         releaseName: cert-manager-csi-driver
         valueFiles:
-          - $values/rendered/${OVERLAY_NAME}/cert-manager/certManagerCsiValues.yaml
+          - $values/_rendered/cert-manager/certManagerCsiValues.yaml
     - repoURL: $GITEA_CLUSTER_SERVICES_REPO_URL
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
       ref: values
