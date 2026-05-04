@@ -19,9 +19,10 @@ if [ -z "$first_node" ] || [ "$first_node" = "null" ]; then
   exit 1
 fi
 
-talosctl --talosconfig "$active_dir/talosconfig" kubeconfig "$active_dir/kubeconfig" --nodes "$first_node" --merge
+talosctl --talosconfig "$active_dir/talosconfig" kubeconfig "$overlay_dir/talos/kubeconfig" --nodes "$first_node" --merge
+ln -sfn "$overlay_dir/talos/kubeconfig" "$active_dir/kubeconfig"
 
 echo "Active TALOSCONFIG: $active_dir/talosconfig"
-echo "Active KUBECONFIG: $active_dir/kubeconfig"
+echo "Active KUBECONFIG:  $active_dir/kubeconfig (→ $overlay_dir/talos/kubeconfig)"
 echo "Selected node: $first_node"
 echo "Open a new terminal to pick up updated env vars."
