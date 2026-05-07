@@ -1,0 +1,184 @@
+# Syncthing
+
+## What it does
+
+Syncthing is a continuous file synchronization application that synchronizes files between two or more devices in real-time. It provides a secure, decentralized file sync solution with end-to-end encryption, no reliance on cloud services, and peer-to-peer architecture.
+
+## Why it was added
+
+Syncthing was added to provide a self-hosted, secure file synchronization solution for the cluster. It enables:
+- Secure file sharing across devices without third-party cloud services
+- Real-time synchronization of files and folders
+- Decentralized architecture with no single point of failure
+- End-to-end encryption for data in transit
+
+## How it is deployed
+
+Syncthing does **not** have an official Helm chart. The deployment uses **raw Kubernetes manifests** managed by ArgoCD:
+
+- **StatefulSet** with 1 replica and volumeClaimTemplates for persistent storage
+- Storage uses **2-replica encrypted volumes** (`globalenc-2replica-retained-backedup-ssd-cp`) for redundancy
+- Deployed to the `default` ArgoCD project (application-level, not cluster infrastructure)
+
+### Security hardening applied
+
+- `hostUsers: false` — user namespace isolation
+- `runAsNonRoot: true` with UID/GID 1000
+- `readOnlyRootFilesystem: true` — tmpfs mounted for writable /tmp
+- `allowPrivilegeEscalation: false`
+- `capabilities: drop: [ALL]` — no Linux capabilities
+- `seccompProfile: RuntimeDefault`
+- `automountServiceAccountToken: false`
+
+## Enabling Syncthing
+
+Syncthing is **excluded by default** in the example overlays. To enable it:
+
+1. Remove `"syncthing"` from the `EXCLUDED_BASE` array in your overlay's `.env` file.
+2. Ensure the following variables are exported in your `.env`:
+   ```bash
+   export SYNCTHING_NAMESPACE="syncthing"
+   export SYNCTHING_IMAGE_TAG="1.29.1"  # Pin to specific version
+   export SYNCTHING_DATA_STORAGE_SIZE="50Gi"
+   export SYNCTHING_DOMAIN="syncthing.${CLUSTER_EXTERNAL_DOMAIN}"
+   export SYNCTHING_SYNC_DOMAIN="syncthing-sync.${CLUSTER_EXTERNAL_DOMAIN}"
+   ```
+3. Re-render: `./adminTasks/render-overlay.sh overlays/<cluster>/<cluster>.env`
+4. For new clusters, `cluster-bootstrap.sh` deploys the ArgoCD Application automatically.
+5. For existing clusters, apply the ArgoCD Application:
+   ```bash
+   kubectl apply -f rendered/<cluster>/syncthing/syncthingArgoApp.yaml
+   ```
+
+## Dependencies
+
+- **Longhorn** — provides 2-replica encrypted persistent storage for config and data volumes
+- **Traefik** — ingress for the web UI (HTTPS only)
+- **cert-manager** — TLS certificates for the web UI
+- **external-dns** — automatic DNS record management for the sync protocol LoadBalancer service
+- **Cilium** — LoadBalancer IP allocation (L2 or BGP mode) for the sync protocol service
+- **Reloader** — automatic pod restart when secrets/configmaps change
+
+## Dependents
+
+None currently.
+
+## User Guide
+
+### Accessing the Web UI
+
+The Syncthing web UI is accessible via HTTPS at the configured domain:
+```
+https://syncthing.${CLUSTER_EXTERNAL_DOMAIN}
+```
+
+### Sync Protocol Access
+
+The sync protocol is exposed via a LoadBalancer service with external-dns:
+```
+syncthing-sync.${CLUSTER_EXTERNAL_DOMAIN}:22000 (TCP/UDP)
+```
+
+Cilium allocates an IP from the configured LoadBalancer IP pool and advertises it via:
+- **L2 mode**: ARP announcements on the node network
+- **BGP mode**: eBGP to the configured router
+
+### Storage Architecture
+
+The deployment uses a **StatefulSet with 1 replica**, but storage has **2 replicas for redundancy**:
+- **Pod replicas**: 1 (single Syncthing instance)
+- **Storage replicas**: 2 (Longhorn replicates data across 2 nodes)
+- **Config volume**: 1Gi (2-replica encrypted, retained, backed up)
+- **Data volume**: ${SYNCTHING_DATA_STORAGE_SIZE} (2-replica encrypted, retained, backed up)
+
+This provides:
+- ✅ Storage redundancy — survive single node failure
+- ✅ Data retention — volumes are retained even if pod/StatefulSet is deleted
+- ✅ Daily backups — Longhorn snapshots
+- ✅ Encryption at rest — LUKS encrypted volumes
+
+### Initial Configuration
+
+On first access to the web UI:
+1. Syncthing will generate a unique device ID
+2. Configure remote devices and folders via the web UI
+3. Set up sync relationships with other Syncthing instances
+
+### Upgrading
+
+1. Update `SYNCTHING_IMAGE_TAG` in your overlay's `.env` file to the desired version
+2. Re-render the overlay
+3. ArgoCD will automatically sync the updated StatefulSet
+4. The pod will be recreated with the new image (StatefulSet rolling update)
+
+### Storage Management
+
+The Syncthing instance uses two persistent volumes:
+- **config** (1Gi) — Syncthing configuration, device ID, database
+- **data** (${SYNCTHING_DATA_STORAGE_SIZE}) — Syncthing synchronized files
+
+To increase storage:
+1. Update `SYNCTHING_DATA_STORAGE_SIZE` in your `.env` file
+2. Re-render and apply
+3. Use `kubectl edit pvc` to expand the volume or delete and recreate the StatefulSet (requires data migration)
+
+### Monitoring
+
+Syncthing exposes metrics via the web UI. To monitor:
+```bash
+# Check pod status
+kubectl get pods -n syncthing
+
+# View logs
+kubectl logs -n syncthing syncthing-0
+
+# Check sync protocol service
+kubectl get svc -n syncthing syncthing-sync
+
+# Check storage
+kubectl get pvc -n syncthing
+```
+
+### Troubleshooting
+
+**Pod not starting:**
+- Check storage provisioning: `kubectl get pvc -n syncthing`
+- Check pod events: `kubectl describe pod -n syncthing syncthing-0`
+- Verify 2 nodes are available for 2-replica storage
+
+**Web UI not accessible:**
+- Verify Ingress: `kubectl get ingressroute -n syncthing`
+- Check certificate: `kubectl get secret -n syncthing syncthing-tls-cert`
+
+**Sync protocol not working:**
+- Verify LoadBalancer IP allocated: `kubectl get svc -n syncthing syncthing-sync`
+- Check external-dns records: `kubectl logs -n external-dns -l app.kubernetes.io/name=external-dns`
+- Verify firewall rules allow port 22000 TCP/UDP
+
+**Connection issues between devices:**
+- Verify the LoadBalancer IP is reachable from remote devices
+- Check that NAT/firewall rules allow inbound connections to port 22000
+- Use the web UI to check device connection status
+
+### Security Notes
+
+- The web UI is exposed via HTTPS only using cert-manager certificates
+- Syncthing uses its own end-to-end encryption for file transfers (TLS 1.3)
+- The sync protocol service is exposed to the internet via LoadBalancer — ensure Syncthing authentication is enabled in the web UI
+- Consider using Syncthing's relay servers for devices behind restrictive firewalls
+- Review Syncthing's [Security Principles](https://docs.syncthing.net/users/security.html)
+- Storage is encrypted at rest using Longhorn LUKS encryption
+
+### Advanced Configuration
+
+To customize Syncthing configuration:
+1. Access the web UI
+2. Navigate to Actions > Settings
+3. Configure options such as:
+   - Folder sync settings
+   - Device discovery
+   - Relay servers
+   - Bandwidth limits
+   - File versioning
+
+Configuration is persisted in the config volume and survives pod restarts.

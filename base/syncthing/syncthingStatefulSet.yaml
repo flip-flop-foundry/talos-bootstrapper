@@ -1,0 +1,129 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: syncthing
+  namespace: ${SYNCTHING_NAMESPACE}
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: syncthing
+  namespace: ${SYNCTHING_NAMESPACE}
+  labels:
+    app: syncthing
+spec:
+  serviceName: syncthing
+  replicas: 1
+  selector:
+    matchLabels:
+      app: syncthing
+  template:
+    metadata:
+      labels:
+        app: syncthing
+      annotations:
+        reloader.stakater.com/auto: "true"
+    spec:
+      serviceAccountName: syncthing
+      automountServiceAccountToken: false
+      hostUsers: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: syncthing
+        image: syncthing/syncthing:${SYNCTHING_IMAGE_TAG}
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
+        env:
+        - name: PUID
+          value: "1000"
+        - name: PGID
+          value: "1000"
+        - name: HOME
+          value: /var/syncthing/config
+        ports:
+        - name: web-ui
+          containerPort: 8384
+          protocol: TCP
+        - name: sync-tcp
+          containerPort: 22000
+          protocol: TCP
+        - name: sync-udp
+          containerPort: 22000
+          protocol: UDP
+        - name: discovery
+          containerPort: 21027
+          protocol: UDP
+        volumeMounts:
+        - name: config
+          mountPath: /var/syncthing/config
+        - name: data
+          mountPath: /var/syncthing/data
+        - name: tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /
+            port: web-ui
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /
+            port: web-ui
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /
+            port: web-ui
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 30
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+  volumeClaimTemplates:
+  - metadata:
+      name: config
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: globalenc-2replica-retained-backedup-ssd-cp
+      resources:
+        requests:
+          storage: 1Gi
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: globalenc-2replica-retained-backedup-ssd-cp
+      resources:
+        requests:
+          storage: ${SYNCTHING_DATA_STORAGE_SIZE}
