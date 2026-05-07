@@ -115,7 +115,7 @@ spec:
       name: config
     spec:
       accessModes: ["ReadWriteOnce"]
-      storageClassName: globalenc-2replica-retained-backedup-ssd-cp
+      storageClassName: pvckey-2replica-retained-backedup-ssd-cp
       resources:
         requests:
           storage: 1Gi
@@ -123,7 +123,7 @@ spec:
       name: data
     spec:
       accessModes: ["ReadWriteOnce"]
-      storageClassName: globalenc-2replica-retained-backedup-ssd-cp
+      storageClassName: pvckey-2replica-retained-backedup-ssd-cp
       resources:
         requests:
           storage: ${SYNCTHING_DATA_STORAGE_SIZE}
