@@ -27,6 +27,13 @@ service:
   annotations:
     advertise-via-dns: "true"  # Critical for ExternalDNS management
     external-dns.alpha.kubernetes.io/hostname: traefik.${CLUSTER_EXTERNAL_DOMAIN}  # Critical for ExternalDNS management
+  spec:
+    # In BGP mode Cilium advertises the LB IP as a /32 host route from every node
+    # that has a Traefik pod. With Local policy the router only receives routes from
+    # pod-bearing nodes, so ECMP at the router maps directly to Traefik replicas with
+    # no extra inter-node hop. Without Local, all BGP nodes advertise the IP and Cilium
+    # may forward traffic cross-node after it arrives.
+    externalTrafficPolicy: Local
 
 ports:
   web:
