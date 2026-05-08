@@ -30,7 +30,7 @@ When the cluster uses Cilium BGP mode, Traefik's `LoadBalancer` Service is confi
 - The upstream router (e.g. OPNsense/FRR) receives one route per pod-bearing node and, with ECMP enabled, distributes flows across them at the IP level.
 - Traffic is guaranteed to arrive at a node that already has a local pod — no extra WireGuard inter-node hop for ingress traffic.
 
-**To take advantage of this**, deploy Traefik with `replicas: 2` (or more) using a `podAntiAffinity` rule that spreads pods across BGP-peering nodes. With a single replica the LB IP is only advertised from one node and there is no ECMP benefit.
+**To take advantage of this**, set `TRAEFIK_REPLICAS` to the number of control-plane BGP-peering nodes (the example configs derive this automatically from `${#TALOS_CONTROL_NODES[@]}`). The built-in `podAntiAffinity` and `nodeAffinity` ensure exactly one pod per control-plane node. With a single replica the LB IP is only advertised from one node and there is no ECMP benefit.
 
 **Router ECMP prerequisite (OPNsense):** OPNsense uses FRR for BGP. ECMP is disabled by default — FRR installs only one best-path into the routing table. To enable it:
 
