@@ -61,17 +61,30 @@ detect_node_disks() {
     # Detect the boot/system disk via Talos SystemDisk resource.
     # Prefer devPath from talosctl output to avoid brittle mount-based inference.
     local system_disk=""
-    local systemdisk_json
-    local systemdisk_error
+    local systemdisk_json=""
+    local systemdisk_error=""
     if systemdisk_error=$("${talosctl_cmd[@]}" get systemdisk --nodes "$node" --endpoints "$node" -o json 2>&1 | grep -v '^WARNING:' | sed "$normalize_hex"); then
+        # Authenticated query succeeded
         systemdisk_json="$systemdisk_error"
     elif echo "$systemdisk_error" | grep -qE "certificate signed by unknown authority|certificate is not valid for any names"; then
+        # TLS cert mismatch — node is in maintenance/pre-install mode; retry without cert verification
         log_warn "Looks like non bootstrapped node, retrying systemdisk query with --insecure flag for node $node"
-        if ! systemdisk_json=$("${talosctl_cmd[@]}" get systemdisk --nodes "$node" --endpoints "$node" --insecure -o json 2>&1 | grep -v '^WARNING:' | sed "$normalize_hex"); then
-            log_warn "Failed to query systemdisk on $node (even with --insecure); will use fallback exclusion"
+        local insecure_rc=0
+        local insecure_output=""
+        insecure_output=$("${talosctl_cmd[@]}" get systemdisk --nodes "$node" --endpoints "$node" --insecure -o json 2>&1 | grep -v '^WARNING:' | sed "$normalize_hex") || insecure_rc=$?
+        if [[ $insecure_rc -eq 0 ]]; then
+            systemdisk_json="$insecure_output"
+        else
+            # systemdisk unavailable even insecurely — expected for a pre-install node where
+            # the resource does not yet exist in the maintenance-mode API.
+            log_warn "systemdisk not available on $node (pre-install/maintenance mode) — skipping additional disk configuration."
+            log_warn "Re-run cluster-initialSetup.sh after the node is bootstrapped to apply data-disk configs."
+            return 0
         fi
     else
-        log_warn "Failed to query systemdisk on $node; will use fallback exclusion"
+        # Non-TLS failure (network issue, auth expiry, wrong endpoint, etc.) — hard fail
+        log_error "Failed to query systemdisk on $node: $systemdisk_error"
+        return 1
     fi
 
     if [ -n "$systemdisk_json" ]; then
@@ -90,34 +103,18 @@ detect_node_disks() {
         ' 2>/dev/null | head -n1)
         if [ -n "$system_disk" ]; then
             log_info "Detected system disk on $node: $system_disk (from systemdisk devPath)"
+        else
+            # JSON was returned but devPath could not be extracted — unexpected API schema
+            log_error "systemdisk query returned JSON on $node but devPath could not be extracted"
+            log_error "Raw systemdisk JSON (first 5 lines): $(echo "$systemdisk_json" | head -5)"
+            return 1
         fi
     fi
 
     if [ -z "$system_disk" ]; then
-        local detected_disks
-        detected_disks=$(echo "$disks_json" | jq -r '
-            ( .items? // (if type=="array" then . else [.] end) )[] |
-            (
-                .spec.devPath //
-                .spec.dev_path //
-                .spec.devicePath //
-                .spec.device_path //
-                ""
-            ) |
-            select(. != "")
-        ' 2>/dev/null | paste -sd ', ' -)
-
-        log_error "Could not detect system disk on $node via systemdisk; aborting disk detection"
-        if [ -n "$systemdisk_error" ]; then
-            log_error "systemdisk command output: $systemdisk_error"
-        fi
-        if [ -n "$systemdisk_json" ]; then
-            log_error "systemdisk JSON payload: $systemdisk_json"
-        fi
-        if [ -n "$detected_disks" ]; then
-            log_error "Disks reported on node $node: $detected_disks"
-        fi
-        return 1
+        # Safety net — should be unreachable with the flow above
+        log_warn "Cannot identify system disk on $node — skipping additional disk detection."
+        return 0
     fi
 
 
