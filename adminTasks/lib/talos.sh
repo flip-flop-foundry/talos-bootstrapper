@@ -46,14 +46,15 @@ generate_node_config() {
     rm -f "$tmp_main" "$tmp_rest" "$tmp_merged"
   fi
 
-  # Disk detection
+  # Disk detection — pass config_file so that maintenance-mode nodes can resolve
+  # the install disk from machine.install.disk / diskSelector rather than systemdisk.
   log_info "  Detecting disks on node $node..."
   local disk_configs
-  disk_configs=$(detect_node_disks "$node" "$TALOSCONFIG")
+  disk_configs=$(detect_node_disks "$node" "$TALOSCONFIG" "$config_file")
 
   if [ -n "$disk_configs" ]; then
     log_info "  Additional disks detected on $node, generating disk configs..."
-    generate_node_disk_configs "$node" "$config_file" "$TALOS_DISK_ENCRYPTION_KMS_URL" "$TALOSCONFIG"
+    generate_node_disk_configs "$node" "$config_file" "$TALOS_DISK_ENCRYPTION_KMS_URL" "$TALOSCONFIG" "$config_file"
   else
     log_info "    No additional disks found on $node (only system disk detected)"
   fi
