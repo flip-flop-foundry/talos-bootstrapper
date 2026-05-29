@@ -91,6 +91,9 @@ prepare_vars() {
     # Build whitelist of variables from the env file and any overrides
     local env_vars=()
     # Extract variable names from the env file (ignore comments and blank lines)
+    # Append a newline to the file content before parsing so that a missing
+    # trailing newline does not cause the last variable to be silently dropped
+    # by the `while read` loop (read returns non-zero on EOF without newline).
     while IFS= read -r line; do
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
         [[ "$line" =~ ^[[:space:]]*$ ]] && continue
@@ -103,7 +106,8 @@ prepare_vars() {
             local captured="${BASH_REMATCH[1]:-${match[1]}}"
             env_vars+=("$captured")
         fi
-    done < "$env_file"
+        # Appending new line to ensure the last line is processed even if it doesn't end with a newline character
+    done < <(cat "$env_file"; echo)
 
     # Add override variable names (from env_overrides array, if present)
     if [[ ${#env_overrides[@]:-} -gt 0 ]]; then
