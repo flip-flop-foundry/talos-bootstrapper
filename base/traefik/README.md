@@ -22,6 +22,22 @@ Every service exposed via an `IngressRoute` or `Ingress` object depends on Traef
 - **gitea** — Gitea web UI is exposed via Traefik
 - **longhorn** — Longhorn dashboard is exposed via Traefik
 
+## BGP mode — ECMP and replicas
+
+When the cluster uses Cilium BGP mode, Traefik's `LoadBalancer` Service is configured with `externalTrafficPolicy: Local`. This means:
+
+- Cilium only advertises the LB IP as a BGP `/32` host route from **nodes that have a running Traefik pod**.
+- The upstream router (e.g. OPNsense/FRR) receives one route per pod-bearing node and, with ECMP enabled, distributes flows across them at the IP level.
+- Traffic is guaranteed to arrive at a node that already has a local pod — no extra WireGuard inter-node hop for ingress traffic.
+
+**To take advantage of this**, set `TRAEFIK_REPLICAS` to the number of control-plane BGP-peering nodes (the example configs derive this automatically from `${#TALOS_CONTROL_NODES[@]}`). The built-in `podAntiAffinity` and `nodeAffinity` ensure exactly one pod per control-plane node. With a single replica the LB IP is only advertised from one node and there is no ECMP benefit.
+
+**Router ECMP prerequisite (OPNsense):** OPNsense uses FRR for BGP. ECMP is disabled by default — FRR installs only one best-path into the routing table. To enable it:
+
+1. Go to **Routing → BGP → General** in the OPNsense UI.
+2. Set **Maximum Paths** (eBGP multipath) to the number of Traefik replicas / BGP-peering nodes.
+3. Save and apply. Verify with `show ip bgp <LB-IP>/32` in the FRR shell — each node's next-hop should appear with `*>`.
+
 ## User Guide
 
 ### Exposing a new service
