@@ -120,7 +120,10 @@ data:
       # If you want to allow any volume, please use the following configuration:
       # valid_volumes:
       #   - '**'
-      valid_volumes: []
+      valid_volumes: 
+        - /etc/ssl/certs
+        - /etc/ssl/certs/**
+        - /etc/ssl/certs/cluster-ca.crt
       # Overrides the docker client host with the specified one.
       # If it's empty, act_runner will find an available docker host automatically.
       # If it's "-", act_runner will find an available docker host automatically, but the docker host won't be mounted to the job containers and service containers.
