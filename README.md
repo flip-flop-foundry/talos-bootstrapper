@@ -140,8 +140,9 @@ See [overlays/yourCluster-bgp/](overlays/yourCluster-bgp/) for a complete exampl
 ## Bootstrap Workflow
 
 ```
-1. cluster-initialSetup.sh  → Install prerequisites, generate Talos machine configs
-2. [Manual]                  → Install Talos OS on nodes
+1. [Manual]                  → Boot nodes from Talos ISO/image into maintenance mode
+                               (skip for PXE — cluster-initialSetup.sh handles this automatically)
+2. cluster-initialSetup.sh  → Generate Talos machine configs and apply them to nodes in maintenance mode
 3. cluster-bootstrap.sh      → Full bootstrap:
    ├─ Setup kubeconfig + helm repos
    ├─ Install Cilium (networking — must be first)
@@ -153,6 +154,103 @@ See [overlays/yourCluster-bgp/](overlays/yourCluster-bgp/) for a complete exampl
    └─ Upgrade ArgoCD to final config pointing at Gitea
 4. ArgoCD manages everything → auto-sync, self-heal, prune
 ```
+
+## Node Provisioning — Installing Talos OS
+
+Before running `cluster-initialSetup.sh`, nodes must be booted into Talos maintenance mode. The script generates machine configs and immediately applies them to the waiting nodes — so they need to be reachable first. How you get them there depends on your hardware.
+
+> **Exception — PXE boot:** When `TALOS_PXE_ENABLED=true`, `cluster-initialSetup.sh` starts the PXE server automatically and waits for nodes to boot. No manual step required.
+
+### Choosing the Right Installer Type
+
+`TALOS_INSTALLER_TYPE` in your `.env` file controls which image the cluster uses for the [Talos Image Factory](https://factory.talos.dev). It also controls how Talos identifies the machine's platform at boot time.
+
+| Installer Type | Platform | When to Use |
+|----------------|----------|-------------|
+| `installer` | `metal` | Bare metal, no Secure Boot |
+| `installer-secureboot` | `metal` | Bare metal with UEFI Secure Boot |
+| `metal-installer-secureboot` | `metal` | Bare metal with Secure Boot (preferred for modern hardware) |
+| `nocloud-installer-secureboot` | `nocloud` | VMs on Proxmox, cloud, or any hypervisor — Secure Boot |
+
+> **Raspberry Pi 4** does not use `TALOS_INSTALLER_TYPE` for the initial flash. It uses a dedicated `rpi_generic` overlay image (raw `.raw.xz`). See below.
+
+### Bare Metal (USB ISO)
+
+1. Get the ISO URL — run `pxe-setup.sh` (it prints the URL), or build it manually once you have the schematic ID (printed by `cluster-initialSetup.sh` or `pxe-setup.sh`):
+   ```
+   https://factory.talos.dev/image/<SCHEMATIC_ID>/<TALOS_INSTALL_VERSION>/metal-amd64.iso
+   https://factory.talos.dev/image/<SCHEMATIC_ID>/<TALOS_INSTALL_VERSION>/metal-amd64-secureboot.iso
+   ```
+2. Flash the ISO to a USB stick (e.g. with [Balena Etcher](https://etcher.balena.io/) or `dd`).
+3. Boot the node from USB — Talos enters maintenance mode.
+4. With all nodes in maintenance mode, run `cluster-initialSetup.sh` — it generates and applies the machine configs.
+
+Use `TALOS_INSTALLER_TYPE="metal-installer-secureboot"` for modern bare-metal hardware with Secure Boot, or `installer-secureboot` / `installer` for older setups.
+
+### Proxmox VMs
+
+Talos runs as a VM on Proxmox using the `nocloud` platform. The `nocloud` installer type tells Talos it is running in a generic VM environment (not a named cloud provider). Machine config is applied via `talosctl apply-config` over the network once the VM is in maintenance mode — no cloud-init drive is needed.
+
+**Installer type:**
+```bash
+export TALOS_INSTALLER_TYPE="nocloud-installer-secureboot"
+```
+
+**VM setup in Proxmox:**
+1. Download the Talos ISO from the Image Factory:
+   ```
+   https://factory.talos.dev/image/<SCHEMATIC_ID>/<TALOS_INSTALL_VERSION>/metal-amd64.iso
+   ```
+2. Upload the ISO to your Proxmox ISO storage (Datacenter → Storage → ISO Images).
+3. Create a VM:
+   - **Machine type:** `q35`
+   - **BIOS:** `OVMF (UEFI)` with EFI disk enabled (required for Secure Boot; use `SeaBIOS` + `installer` type if you want non-Secure Boot)
+   - **Boot disk:** `VirtIO SCSI` or `SATA`, ≥ `TALOS_MIN_INSTALL_DISK_SIZE_GB`
+   - **Network:** `VirtIO` — ensure the VM NIC is on the same network as your other cluster nodes
+   - **CD-ROM:** attach the Talos ISO
+4. Start the VM — it boots from the ISO into Talos maintenance mode.
+5. With all VMs in maintenance mode, run `cluster-initialSetup.sh` — it generates and applies the machine configs.
+6. After Talos installs to disk and reboots, detach/remove the ISO.
+
+> **Tip:** Set `LONGHORN_IGNORE_USB_DISKS=true` and `TALOS_MIN_INSTALL_DISK_SIZE_GB=64` in your overlay — VMs don't have USB storage, and the install disk should be a proper virtual disk.
+
+### Raspberry Pi 4
+
+Raspberry Pi 4 uses a dedicated image with U-Boot and the `rpi_generic` SBC overlay — no separate UEFI firmware is needed.
+
+**Installer type:** Not applicable for initial flash. The RPi image is built automatically alongside your cluster schematic when running `pxe-setup.sh`.
+
+1. Run `pxe-setup.sh` — it prints an SD card image URL:
+   ```
+   https://factory.talos.dev/image/<RPI_SCHEMATIC_ID>/<TALOS_INSTALL_VERSION>/metal-arm64.raw.xz
+   ```
+   The RPi schematic includes the same extensions as your cluster, plus the `siderolabs/sbc-raspberrypi` overlay.
+2. Flash to a microSD card (or USB boot drive):
+   ```bash
+   # macOS
+   xz -d -c metal-arm64.raw.xz | sudo dd conv=fsync bs=16m of=/dev/rdiskN
+
+   # Linux
+   xz -d -c metal-arm64.raw.xz | sudo dd conv=fsync bs=4M of=/dev/sdX
+   ```
+3. Insert the card and power on the Pi — Talos enters maintenance mode.
+4. With all nodes in maintenance mode, run `cluster-initialSetup.sh` — it generates and applies the machine configs.
+
+**Raspberry Pi node tuning** — RPi 4 nodes are often memory-constrained. Disable hugepages in the per-node patch:
+```yaml
+# overlays/<cluster>/talos/nodes/<hostname>.yaml
+machine:
+  sysctls:
+    vm.nr_hugepages: "0"
+```
+
+> **Mixed clusters:** You can run Proxmox VMs and Raspberry Pis in the same cluster. Each node gets its own machine config regardless of hardware type. The `TALOS_INSTALLER_TYPE` in your `.env` applies to the **install image** embedded in the machine config; ensure it matches the majority of your nodes or use per-node patches for outliers.
+
+### PXE Boot
+
+For bare-metal nodes that can network boot, see the [iPXE Network Boot](#ipxe-network-boot) section below. PXE eliminates the need to flash USB sticks and works well in rack environments. Not applicable to Proxmox VMs or Raspberry Pis.
+
+---
 
 ## iPXE Network Boot
 

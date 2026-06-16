@@ -55,6 +55,6 @@ if git push --set-upstream "$GIT_REMOTE_URL" HEAD:refs/heads/"$GIT_BRANCH_NAME";
   echo "Push successful. Branch $GIT_BRANCH_NAME is pushed and tracking $GIT_REMOTE_URL/$GIT_BRANCH_NAME"
   exit 0
 else
-  echo "Push failed." >&2
+  echo "Push failed to: $GIT_REMOTE_URL HEAD:refs/heads/$GIT_BRANCH_NAME" >&2
   exit 6
 fi

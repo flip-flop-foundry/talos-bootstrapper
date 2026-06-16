@@ -152,7 +152,7 @@ spec: # https://cloudnative-pg.io/documentation/current/cloudnative-pg.v1/#postg
   imageName: ghcr.io/cloudnative-pg/postgresql:${GITEA_PSQL_VERSION}
   storage:
     size: ${GITEA_PSQL_SIZE}
-    storageClass: nssharedkey-2replica-retained-backedup-ssd-wn
+    storageClass: nssharedkey-2replica-retained-backedup-ssd-cp
   backup:
     volumeSnapshot:
       className: longhorn-snapshot
