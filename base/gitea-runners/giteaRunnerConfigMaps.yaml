@@ -8,16 +8,28 @@ metadata:
 data:
   saveEnvs.sh: |
     #!/bin/bash
-    #Creates /data/.env which will be picked up runner-config.yaml
-    #Intended to pick ups Envs from the act-runner and pass them along to the containers it creates
+    # Creates /data/.env which is picked up by runner-config.yaml.
+    # Intended to pass Envs from the act-runner pod into the job containers it spawns.
     cd /data
     rm -f .env
 
     echo KUBERNETES_SERVICE_PORT=$KUBERNETES_SERVICE_PORT >> .env
     echo KUBERNETES_SERVICE_HOST=$KUBERNETES_SERVICE_HOST >> .env
 
-    echo Created envs file:
-    cat /data/.env
+    # Export the runner pod's service account token so workflows can call the
+    # Kubernetes API (e.g. kubectl rollout restart) without additional secrets.
+    # The runner SA only has the permissions granted by cluster RBAC; per-customer
+    # access is scoped by RoleBindings created by bootstrap-customer.sh.
+    # NOTE: this makes the token available to ALL jobs that run on this runner.
+    #       For multi-tenant setups, consider using per-customer CI service accounts
+    #       and Gitea Actions secrets instead.
+    SA_TOKEN_PATH="/var/run/secrets/kubernetes.io/serviceaccount/token"
+    if [ -f "$SA_TOKEN_PATH" ]; then
+        echo "KUBE_SA_TOKEN=$(cat "$SA_TOKEN_PATH")" >> .env
+    fi
+
+    echo Created envs file \(token value redacted\):
+    grep -v KUBE_SA_TOKEN /data/.env
 ---
 apiVersion: v1
 kind: ConfigMap
