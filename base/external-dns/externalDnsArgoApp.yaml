@@ -44,4 +44,4 @@ spec:
       ref: values
       directory:
         recurse: false
-        include: "{externalDnsTsigSecret.yaml}"
+        exclude: "{externalDnsHelmValues.yaml,externalDnsArgoApp.yaml}"  # Exclude the TSIG secret, since we are using Pihole instead of RFC2136 and don't need it

@@ -1,0 +1,15 @@
+# Generated Talos machine configs — recreated by render-overlay.sh / cluster-initialSetup.sh
+talos/controlplane.yaml
+talos/worker.yaml
+talos/talosPatchConfigRendered.yaml
+talos/talosPatchConfigControlplaneRendered.yaml
+talos/nodes/
+
+# Sensitive Talos and Kubernetes credentials — never commit; manage with envoke + Bitwarden
+# See: https://github.com/OpalBolt/envoke
+talos/talosconfig
+talos/talos-secrets.yaml
+talos/kubeconfig
+
+# macOS metadata
+.DS_Store

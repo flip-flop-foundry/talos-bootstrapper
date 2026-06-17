@@ -11,7 +11,7 @@ source "$SCRIPT_DIR/lib/logging.sh" || { echo "Error: Failed to load logging.sh"
 : ${GITEA_READY_MAX_RETRIES:=60}
 : ${GITEA_READY_RETRY_INTERVAL:=5}
 : ${GITEA_POD_READY_TIMEOUT:=300s}
-: ${ARGOCD_SERVICE_TOKEN_SCOPES:='["read:repository","read:organization"]'}
+: ${ARGOCD_SERVICE_TOKEN_SCOPES:='["read:repository","read:organization","read:user","read:issue"]'}
 
 # Get HTTP code from response (expects format: body\nhttp_code)
 get_http_code() {
@@ -732,6 +732,388 @@ check_gitea_bootstrap_status() {
         return 0
     else
         log_warn "Gitea bootstrap is incomplete"
+        return 1
+    fi
+}
+
+
+# Add user to organization as a member
+# Args: org_name username api_url token
+add_user_to_org() {
+    local org_name="$1"
+    local username="$2"
+    local api_url="$3"
+    local token="$4"
+
+    log_info "Adding $username to org $org_name as owner..."
+
+    # Gitea has no PUT /orgs/{org}/members/{username} endpoint.
+    # Members are added via the Teams API: find the Owners team, then add the user.
+    local teams_response
+    teams_response=$(curl -k -s -S -w "\n%{http_code}" \
+        -H "Authorization: token $token" \
+        "$api_url/orgs/$org_name/teams")
+
+    local teams_code
+    teams_code=$(get_http_code "$teams_response")
+    local teams_body
+    teams_body=$(get_http_body "$teams_response")
+
+    if [[ "$teams_code" != "200" ]]; then
+        log_error "Failed to list org teams (HTTP $teams_code): $teams_body"
+        return 1
+    fi
+
+    local owners_team_id
+    owners_team_id=$(echo "$teams_body" | jq -r '.[] | select(.name == "Owners") | .id')
+
+    if [[ -z "$owners_team_id" ]]; then
+        log_error "Could not find Owners team for org $org_name"
+        return 1
+    fi
+
+    local response
+    response=$(curl -k -s -S -w "\n%{http_code}" -X PUT \
+        -H "Content-Type: application/json" \
+        -H "Authorization: token $token" \
+        "$api_url/teams/$owners_team_id/members/$username")
+
+    local http_code
+    http_code=$(get_http_code "$response")
+
+    if [[ "$http_code" == "204" || "$http_code" == "200" ]]; then
+        log_success "User $username added to org $org_name (Owners team)"
+        return 0
+    else
+        log_error "Failed to add user to org (HTTP $http_code): $(get_http_body "$response")"
+        return 1
+    fi
+}
+
+# Set or update an Actions repository variable (plain-text, no encryption needed).
+# Gitea 1.22+ API (confirmed against 1.25.4 swagger):
+#   POST /repos/{owner}/{repo}/actions/variables/{variablename}  -> create  body: {"value":"…"}
+#   PUT  /repos/{owner}/{repo}/actions/variables/{variablename}  -> update  body: {"value":"…"}
+# Both methods target the NAMED endpoint (not the collection).
+# Args: org_or_user repo_name var_name var_value api_url token
+set_gitea_repo_variable() {
+    local org_or_user="$1"
+    local repo_name="$2"
+    local var_name="$3"
+    local var_value="$4"
+    local api_url="$5"
+    local token="$6"
+
+    log_info "Setting repo variable $var_name on $org_or_user/$repo_name"
+
+    local var_url="$api_url/repos/$org_or_user/$repo_name/actions/variables/$var_name"
+    local payload
+    payload=$(jq -n --arg v "$var_value" '{value: $v}')
+
+    # Check whether the variable already exists to decide create vs update
+    local check_code
+    check_code=$(curl -k -s -o /dev/null -w "%{http_code}" \
+        -H "Authorization: token $token" \
+        "$var_url")
+
+    local method
+    [[ "$check_code" == "200" ]] && method="PUT" || method="POST"
+
+    local response
+    response=$(curl -k -s -S -w "\n%{http_code}" -X "$method" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: token $token" \
+        -d "$payload" \
+        "$var_url")
+
+    local http_code body
+    http_code=$(get_http_code "$response")
+    body=$(get_http_body "$response")
+
+    if [[ "$http_code" == "200" || "$http_code" == "201" || "$http_code" == "204" ]]; then
+        log_success "Variable $var_name set"
+        return 0
+    else
+        log_error "Failed to set variable $var_name (HTTP $http_code): $body"
+        return 1
+    fi
+}
+
+# Push a local directory to an arbitrary Gitea repo.
+# Args: src_dir org_name repo_name credentials gitea_domain branch
+push_dir_to_gitea_repo() {
+    local src_dir="$1"
+    local org_name="$2"
+    local repo_name="$3"
+    local credentials="$4"  # username:password
+    local gitea_domain="$5"
+    local branch="${6:-main}"
+
+    local username="${credentials%%:*}"
+    local password="${credentials#*:}"
+    local remote_url="https://${username}:${password}@${gitea_domain}/${org_name}/${repo_name}.git"
+
+    log_info "Pushing $src_dir → $gitea_domain/$org_name/$repo_name ($branch)..."
+
+    local temp_dir
+    temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/gitea-push.XXXXXX")
+
+    # Copy source directory into temp
+    rsync -a --exclude='.git' "$src_dir/" "$temp_dir/"
+
+    pushd "$temp_dir" > /dev/null
+
+    git init -b "$branch"
+    git config user.email "bootstrap@cluster.local"
+    git config user.name  "cluster-bootstrap"
+    git add -A
+    git commit -m "chore: initial commit from bootstrap-customer"
+
+    git -c "http.sslVerify=false" push -u "$remote_url" "HEAD:$branch" --force
+
+    popd > /dev/null
+    rm -rf "$temp_dir"
+
+    log_success "Pushed to $org_name/$repo_name"
+}
+
+
+# Create or update a file in a Gitea repository using the Contents API.
+# Handles both first-time creation and subsequent updates (fetches existing SHA).
+# Args: owner repo filepath content_string commit_message api_url token
+#   content_string: raw text content (will be base64-encoded internally)
+create_or_update_gitea_file() {
+    local owner="$1"
+    local repo="$2"
+    local filepath="$3"
+    local content="$4"
+    local commit_message="$5"
+    local api_url="$6"
+    local token="$7"
+
+    local encoded_content
+    encoded_content=$(printf '%s' "$content" | base64 | tr -d '\n')
+
+    # Check if file already exists to get its SHA (required for updates)
+    local existing_response
+    existing_response=$(curl -k -s -S -w "\n%{http_code}" \
+        -H "Authorization: token $token" \
+        "$api_url/repos/$owner/$repo/contents/$filepath")
+
+    local existing_code
+    existing_code=$(echo "$existing_response" | tail -n1)
+    local existing_body
+    existing_body=$(echo "$existing_response" | sed '$d')
+
+    # Gitea Contents API: POST to create a new file, PUT to update an existing one.
+    # PUT without a SHA returns 422 "[SHA]: Required".
+    local method payload
+    if [[ "$existing_code" == "200" ]]; then
+        local sha
+        sha=$(echo "$existing_body" | jq -r '.sha')
+        log_info "Updating existing file: $owner/$repo/$filepath (SHA: $sha)"
+        method="PUT"
+        payload=$(jq -n \
+            --arg msg "$commit_message" \
+            --arg content "$encoded_content" \
+            --arg sha "$sha" \
+            '{message: $msg, content: $content, sha: $sha}')
+    else
+        log_info "Creating new file: $owner/$repo/$filepath"
+        method="POST"
+        payload=$(jq -n \
+            --arg msg "$commit_message" \
+            --arg content "$encoded_content" \
+            '{message: $msg, content: $content}')
+    fi
+
+    local response
+    response=$(curl -k -s -S -w "\n%{http_code}" -X "$method" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: token $token" \
+        -d "$payload" \
+        "$api_url/repos/$owner/$repo/contents/$filepath")
+
+    local http_code body
+    http_code=$(echo "$response" | tail -n1)
+    body=$(echo "$response" | sed '$d')
+
+    if [[ "$http_code" == "200" || "$http_code" == "201" ]]; then
+        log_success "File committed: $owner/$repo/$filepath"
+        return 0
+    else
+        log_error "Failed to write file $filepath (HTTP $http_code): $body"
+        return 1
+    fi
+}
+
+# Create a Gitea user if they don't exist, or reset their password if they do.
+# Uses admin credentials.  The user is created as restricted (no global perms)
+# with must_change_password=false so CI tokens can be minted immediately.
+# Args: username email password api_url admin_token
+create_or_ensure_gitea_user() {
+    local username="$1"
+    local email="$2"
+    local password="$3"
+    local api_url="$4"
+    local admin_token="$5"
+
+    # Check whether the user already exists
+    local check_code
+    check_code=$(curl -k -s -o /dev/null -w "%{http_code}" \
+        -H "Authorization: token $admin_token" \
+        "$api_url/users/$username")
+
+    if [[ "$check_code" == "200" ]]; then
+        log_info "CI user '$username' already exists — resetting password"
+        local patch_resp
+        patch_resp=$(curl -k -s -S -w "\n%{http_code}" -X PATCH \
+            -H "Content-Type: application/json" \
+            -H "Authorization: token $admin_token" \
+            -d "$(jq -n --arg u "$username" --arg p "$password" '{source_id:0,login_name:$u,password:$p,must_change_password:false}')" \
+            "$api_url/admin/users/$username")
+        local patch_code
+        patch_code=$(get_http_code "$patch_resp")
+        if [[ "$patch_code" != "200" ]]; then
+            log_error "Failed to reset password for '$username' (HTTP $patch_code): $(get_http_body "$patch_resp")"
+            return 1
+        fi
+        log_success "Password reset for CI user '$username'"
+    else
+        log_info "Creating CI user '$username'"
+        local create_resp
+        create_resp=$(curl -k -s -S -w "\n%{http_code}" -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: token $admin_token" \
+            -d "$(jq -n \
+                --arg u "$username" \
+                --arg e "$email" \
+                --arg p "$password" \
+                '{username:$u,email:$e,password:$p,must_change_password:false,restricted:true,send_notify:false}')" \
+            "$api_url/admin/users")
+        local create_code
+        create_code=$(get_http_code "$create_resp")
+        if [[ "$create_code" != "201" ]]; then
+            log_error "Failed to create CI user '$username' (HTTP $create_code): $(get_http_body "$create_resp")"
+            return 1
+        fi
+        log_success "CI user '$username' created"
+    fi
+}
+
+# Create or update an org-level Actions variable.
+# POST (create) / PUT (update) both target the NAMED endpoint.
+# Args: org var_name var_value api_url token
+set_gitea_org_variable() {
+    local org="$1"
+    local var_name="$2"
+    local var_value="$3"
+    local api_url="$4"
+    local token="$5"
+
+    log_info "Setting org variable $var_name on $org"
+
+    local var_url="$api_url/orgs/$org/actions/variables/$var_name"
+    local payload
+    payload=$(jq -n --arg v "$var_value" '{value: $v}')
+
+    local check_code
+    check_code=$(curl -k -s -o /dev/null -w "%{http_code}" \
+        -H "Authorization: token $token" \
+        "$var_url")
+
+    local method
+    [[ "$check_code" == "200" ]] && method="PUT" || method="POST"
+
+    local response
+    response=$(curl -k -s -S -w "\n%{http_code}" -X "$method" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: token $token" \
+        -d "$payload" \
+        "$var_url")
+
+    local http_code body
+    http_code=$(get_http_code "$response")
+    body=$(get_http_body "$response")
+
+    if [[ "$http_code" == "200" || "$http_code" == "201" || "$http_code" == "204" ]]; then
+        log_success "Org variable $var_name set on $org"
+        return 0
+    else
+        log_error "Failed to set org variable $var_name (HTTP $http_code): $body"
+        return 1
+    fi
+}
+
+# Create or update an org-level Actions secret.
+# Gitea org secrets API: PUT /orgs/{org}/actions/secrets/{secretname} body: {"data":"…"}
+# (single method for both create and update, unlike variables)
+# Args: org secret_name secret_value api_url token
+set_gitea_org_secret() {
+    local org="$1"
+    local secret_name="$2"
+    local secret_value="$3"
+    local api_url="$4"
+    local token="$5"
+
+    log_info "Setting org secret $secret_name on $org"
+
+    local payload
+    payload=$(jq -n --arg v "$secret_value" '{data: $v}')
+
+    local response
+    response=$(curl -k -s -S -w "\n%{http_code}" -X PUT \
+        -H "Content-Type: application/json" \
+        -H "Authorization: token $token" \
+        -d "$payload" \
+        "$api_url/orgs/$org/actions/secrets/$secret_name")
+
+    local http_code body
+    http_code=$(get_http_code "$response")
+    body=$(get_http_body "$response")
+
+    if [[ "$http_code" == "200" || "$http_code" == "201" || "$http_code" == "204" ]]; then
+        log_success "Org secret $secret_name set on $org"
+        return 0
+    else
+        log_error "Failed to set org secret $secret_name (HTTP $http_code): $body"
+        return 1
+    fi
+}
+
+# Create or update a repository-level Actions secret.
+# Gitea secrets API uses plain text (no libsodium unlike GitHub):
+#   PUT /repos/{owner}/{repo}/actions/secrets/{secretname}  body: {"data":"…"}
+# Args: owner repo secret_name secret_value api_url token
+set_gitea_repo_secret() {
+    local owner="$1"
+    local repo="$2"
+    local secret_name="$3"
+    local secret_value="$4"
+    local api_url="$5"
+    local token="$6"
+
+    log_info "Setting repo secret $secret_name on $owner/$repo"
+
+    local payload
+    payload=$(jq -n --arg v "$secret_value" '{data: $v}')
+
+    local response
+    response=$(curl -k -s -S -w "\n%{http_code}" -X PUT \
+        -H "Content-Type: application/json" \
+        -H "Authorization: token $token" \
+        -d "$payload" \
+        "$api_url/repos/$owner/$repo/actions/secrets/$secret_name")
+
+    local http_code body
+    http_code=$(get_http_code "$response")
+    body=$(get_http_body "$response")
+
+    if [[ "$http_code" == "200" || "$http_code" == "201" || "$http_code" == "204" ]]; then
+        log_success "Secret $secret_name set on $owner/$repo"
+        return 0
+    else
+        log_error "Failed to set secret $secret_name (HTTP $http_code): $body"
         return 1
     fi
 }

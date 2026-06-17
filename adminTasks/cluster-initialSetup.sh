@@ -587,6 +587,24 @@ else
 fi
 
 # ============================================================================
+# NODE REGISTRY CONFIG — distribute registry TLS trust and pull credentials
+# ============================================================================
+# Waits for cert-manager-trust to distribute the cluster CA bundle, then
+# applies RegistryTLSConfig and RegistryAuthConfig to every node that is
+# missing them. This allows nodes to pull images from the internal Gitea
+# container registry without x509 errors. No reboot is required.
+
+log_info "Applying registry TLS trust and pull credentials to all Talos nodes..."
+"$SCRIPT_DIR/apply-node-registry-config.sh" "$CONFIG_FILE"
+CA_TRUST_STATUS=$?
+if [[ $CA_TRUST_STATUS -ne 0 ]]; then
+  log_error "Node registry config failed (exit $CA_TRUST_STATUS)."
+  log_error "Nodes will not be able to pull images from the internal registry until this is resolved."
+  log_error "Re-run:  $SCRIPT_DIR/apply-node-registry-config.sh $CONFIG_FILE"
+  DEPLOY_STATUS=$CA_TRUST_STATUS
+fi
+
+# ============================================================================
 # CLEANUP
 # ============================================================================
 

@@ -51,7 +51,16 @@ readonly ARGOCD_SERVICE_ACCOUNT_SECRET_DESCRIPTION="Username and password for Ar
 readonly ARGOCD_REPO_CREDS_SECRET="gitea-argocd-cluster-services-repo-creds" #Name of the secret in ArgoCD namespace to hold repo credentials, used by ArgoApps
 readonly ARGOCD_SERVICE_ACCOUNT_TOKEN_NAME="repo-read-token" #Name of the token to create for ArgoCD service account
 readonly ARGOCD_SERVICE_ACCOUNT_REPO_SECRET_DESCRIPTION="Read-only token/ArgoRepo for ArgoCD service account to access cluster-services repositories"
-readonly ARGOCD_SERVICE_TOKEN_SCOPES='["read:repository","read:organization", "read:user"]' #Scopes given to ArgoCD service account token
+readonly ARGOCD_SERVICE_TOKEN_SCOPES='["read:repository","read:organization","read:user","read:issue"]' #Scopes given to ArgoCD service account token
+readonly CUSTOMERS_ARGOCD_SCM_SECRET="${CUSTOMERS_ARGOCD_SCM_SECRET:-gitea-argocd-customers-scm-token}" #k8s secret used by the customer-apps ApplicationSet SCM provider
+
+# Registry pull service account — used by Talos RegistryAuthConfig so all cluster
+# nodes can pull images from the Gitea container registry without imagePullSecrets.
+# Must be added as an org member in every customer org (done by bootstrap-customer.sh).
+readonly REGISTRY_PULL_USERNAME="registry-pull"
+readonly REGISTRY_PULL_SECRET="gitea-registry-pull-credentials"  # K8s secret in GITEA_NAMESPACE
+readonly REGISTRY_PULL_SECRET_DESCRIPTION="Read-only Gitea credentials for Talos RegistryAuthConfig — allows containerd on all nodes to pull images from the Gitea container registry"
+readonly REGISTRY_PULL_PASSWORD_LENGTH=32
 
 readonly ADMIN_TOKEN_SCOPES='["write:repository","write:organization","write:admin"]' #Scopes for the temporary admin token
 readonly ARGOCD_SERVICE_PASSWORD_LENGTH=32
@@ -473,9 +482,45 @@ main() {
             log_error "Failed to create ArgoCD repo-creds secret"
             exit 1
         fi
+
+        # Also store the same token in a separate secret used by the customer-apps
+        # ApplicationSet SCM provider (tokenRef expects key "token", not username/password).
+        local scm_secret="${CUSTOMERS_ARGOCD_SCM_SECRET:-gitea-argocd-customers-scm-token}"
+        if kubectl get secret "$scm_secret" -n "$ARGOCD_NAMESPACE" &>/dev/null; then
+            log_success "ApplicationSet SCM token secret already exists: $ARGOCD_NAMESPACE/$scm_secret"
+        else
+            log_info "Creating ApplicationSet SCM token secret: $ARGOCD_NAMESPACE/$scm_secret"
+            kubectl create secret generic "$scm_secret" \
+                --namespace "$ARGOCD_NAMESPACE" \
+                --from-literal=token="$argocd_service_account_token"
+            log_success "ApplicationSet SCM token secret created: $ARGOCD_NAMESPACE/$scm_secret"
+        fi
     fi
     echo ""
-    
+        ################################################################################
+    #
+    #       Create registry-pull service account for Talos RegistryAuthConfig
+    #
+    ################################################################################
+
+    log_info "Setting up Gitea registry-pull service account..."
+    local registry_pull_email="${REGISTRY_PULL_USERNAME}@${GITEA_DOMAIN_NAME}"
+    local registry_pull_password
+    registry_pull_password=$(head -c 24 /dev/urandom | base64 | tr -d '/+=' | head -c "$REGISTRY_PULL_PASSWORD_LENGTH")
+
+    if ! create_gitea_user "$REGISTRY_PULL_USERNAME" "$registry_pull_email" "$gitea_api_url" "$token" "$registry_pull_password"; then
+        log_error "Failed to create registry-pull user"
+        exit 1
+    fi
+
+    # Store credentials in the gitea namespace so apply-node-registry-config.sh can
+    # read them when applying RegistryAuthConfig to all Talos nodes.
+    if ! ensure_credentials_secret "$REGISTRY_PULL_USERNAME" "$registry_pull_password" "$REGISTRY_PULL_SECRET" "$GITEA_NAMESPACE" "$REGISTRY_PULL_SECRET_DESCRIPTION"; then
+        log_error "Failed to ensure registry-pull credentials secret"
+        exit 1
+    fi
+    log_success "Registry-pull service account ready: $GITEA_NAMESPACE/$REGISTRY_PULL_SECRET"
+    echo ""
     # Summary
     log_success \"Gitea bootstrap complete!\"
     log_info \"Organization: $GITEA_CLUSTER_GITEA_ORG_NAME\"

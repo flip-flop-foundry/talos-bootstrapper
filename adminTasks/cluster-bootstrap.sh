@@ -247,8 +247,8 @@ if [[ "$GITEA_ALREADY_BOOTSTRAPPED" == "false" ]]; then
     # Skip if no files found (glob didn't match)
     [[ -e "$manifest" ]] || continue
     
-    # Extract and apply ArgoCD Application objects
-    if ! filtered_output=$(yq eval 'select(.kind == "Application" and .apiVersion == "argoproj.io/v1alpha1")' "$manifest" 2>&1); then
+    # Extract and apply ArgoCD Application and ApplicationSet objects
+    if ! filtered_output=$(yq eval 'select(.apiVersion == "argoproj.io/v1alpha1" and (.kind == "Application" or .kind == "ApplicationSet"))' "$manifest" 2>&1); then
       log_warn "  yq failed to process $(basename "$manifest"), skipping..."
       continue
     fi
@@ -368,8 +368,8 @@ for manifest in "$RENDERED_OVERLAY_DIR"/*/*.yaml; do
   # Skip if no files found (glob didn't match)
   [[ -e "$manifest" ]] || continue
   
-  # Extract and apply ArgoCD Application objects
-  if ! filtered_output=$(yq eval 'select(.kind == "Application" and .apiVersion == "argoproj.io/v1alpha1")' "$manifest" 2>&1); then
+  # Extract and apply ArgoCD Application and ApplicationSet objects
+  if ! filtered_output=$(yq eval 'select(.apiVersion == "argoproj.io/v1alpha1" and (.kind == "Application" or .kind == "ApplicationSet"))' "$manifest" 2>&1); then
     log_warn "  yq failed to process $(basename "$manifest"), skipping..."
     continue
   fi
