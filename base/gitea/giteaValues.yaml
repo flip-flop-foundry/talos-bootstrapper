@@ -284,6 +284,8 @@ gitea:
     value: "7"
   - name: GITEA__WEBHOOK__ALLOWED_HOST_LIST
     value: "${ARGOCD_DOMAIN}"
+  - name: GITEA__ACTIONS__ENABLED
+    value: "true"
 
 
 

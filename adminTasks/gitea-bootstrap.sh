@@ -52,7 +52,7 @@ readonly ARGOCD_REPO_CREDS_SECRET="gitea-argocd-cluster-services-repo-creds" #Na
 readonly ARGOCD_SERVICE_ACCOUNT_TOKEN_NAME="repo-read-token" #Name of the token to create for ArgoCD service account
 readonly ARGOCD_SERVICE_ACCOUNT_REPO_SECRET_DESCRIPTION="Read-only token/ArgoRepo for ArgoCD service account to access cluster-services repositories"
 readonly ARGOCD_SERVICE_TOKEN_SCOPES='["read:repository","read:organization","read:user","read:issue"]' #Scopes given to ArgoCD service account token
-readonly CUSTOMERS_ARGOCD_SCM_SECRET="${CUSTOMERS_ARGOCD_SCM_SECRET:-gitea-argocd-customers-scm-token}" #k8s secret used by the customer-apps ApplicationSet SCM provider
+readonly CUSTOMERS_ARGOCD_SCM_SECRET="gitea-argocd-customers-scm-token" #k8s secret used by the customer-apps ApplicationSet SCM provider
 
 # Registry pull service account — used by Talos RegistryAuthConfig so all cluster
 # nodes can pull images from the Gitea container registry without imagePullSecrets.
@@ -485,7 +485,7 @@ main() {
 
         # Also store the same token in a separate secret used by the customer-apps
         # ApplicationSet SCM provider (tokenRef expects key "token", not username/password).
-        local scm_secret="${CUSTOMERS_ARGOCD_SCM_SECRET:-gitea-argocd-customers-scm-token}"
+        local scm_secret="$CUSTOMERS_ARGOCD_SCM_SECRET"
         if kubectl get secret "$scm_secret" -n "$ARGOCD_NAMESPACE" &>/dev/null; then
             log_success "ApplicationSet SCM token secret already exists: $ARGOCD_NAMESPACE/$scm_secret"
         else

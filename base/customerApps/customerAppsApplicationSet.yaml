@@ -5,9 +5,10 @@
 # application repositories:
 #
 #   Child 1 — Git file generator
-#     Reads  customers/*/<name>.yaml  from the cluster-services repo.
-#     Each file is a customer descriptor that provides gitea.orgName and
-#     customerName parameters to child 2.
+#     Reads  _rendered/customers/*/<name>.yaml  from the cluster-services repo.
+#     These are rendered by render-overlay.sh from the source descriptors in
+#     customers/*/ and pushed alongside the rest of the overlay, making the
+#     rendered path the canonical source ArgoCD reads from.
 #
 #   Child 2 — SCM provider generator (Gitea)
 #     Uses {{.gitea.orgName}} from child 1 to scan that Gitea org for repos
@@ -23,10 +24,6 @@
 #   GITEA_DOMAIN_NAME                  e.g. gitea.tuborgnetes.dk
 #   GITEA_CLUSTER_SERVICES_REPO_URL    e.g. https://gitea.tuborgnetes.dk/k8s-cluster/cluster-services.git
 #   ARGOCD_NAMESPACE                   e.g. argocd
-#   CUSTOMERS_ARGOCD_SCM_SECRET        k8s secret name in ARGOCD_NAMESPACE
-#                                      key: "token"  value: Gitea token for
-#                                      argocd-cluster-services with scopes
-#                                      read:organization,read:repository,read:user
 #
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
@@ -43,13 +40,17 @@ spec:
     - matrix:
         generators:
           # ----------------------------------------------------------------
-          # Child 1: read every customers/*/<name>.yaml from cluster-services
+          # Child 1: read every _rendered/customers/*/<name>.yaml from
+          # cluster-services. These are rendered by render-overlay.sh from
+          # the source descriptors in customers/*/ and pushed together with
+          # the rest of the overlay — making _rendered/customers/ the single
+          # canonical source for ArgoCD.
           # ----------------------------------------------------------------
           - git:
               repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
               revision: HEAD
               files:
-                - path: "customers/*/*.yaml"
+                - path: "_rendered/customers/*/*.yaml"
               # Prefix all path.* params so they don't clash with the SCM
               # provider params from child 2 (required when both children are
               # generators that produce path-related keys).
@@ -66,7 +67,7 @@ spec:
                 insecure: false
                 allBranches: false
                 tokenRef:
-                  secretName: ${CUSTOMERS_ARGOCD_SCM_SECRET}
+                  secretName: gitea-argocd-customers-scm-token
                   key: token
               filters:
                 - pathsExist:

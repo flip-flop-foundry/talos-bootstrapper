@@ -12,7 +12,7 @@ set -euo pipefail
 #   2. Adds the ArgoCD service account as an org member (needed for SCM scanning)
 #   3. Creates a Gitea repository from the example-gitops-customer/ template
 #   4. Pushes the example application code to Gitea
-#   5. Commits customers/<name>/<name>.yaml descriptor to the cluster-services
+#   5. Commits _rendered/customers/<name>/<name>.yaml descriptor to the cluster-services
 #      repo so the customer-apps ApplicationSet discovers the customer's org
 #   6. Creates an ArgoCD AppProject scoped to <orgName>-* namespaces and
 #      <orgName>/* source repos
@@ -473,12 +473,12 @@ main() {
     # ------------------------------------------------------------------
     log_info "=== Step 5/7: Customer descriptor + ArgoCD AppProject ==="
 
-    # Commit customers/<name>/<name>.yaml to the cluster-services repo.
-    # The customer-apps ApplicationSet reads this file to discover the
-    # customer's Gitea org and create Applications for each matching repo.
+    # Commit _rendered/customers/<name>/<name>.yaml to the cluster-services repo.
+    # The customer-apps ApplicationSet reads from _rendered/customers/ — the same
+    # rendered path that render-overlay.sh produces and push-to-gitea.sh pushes.
     local cluster_services_owner="${GITEA_CLUSTER_GITEA_ORG_NAME}"
     local cluster_services_repo="${GITEA_CLUSTER_SERVICES_REPO_NAME}"
-    local descriptor_path="customers/${customer_name}/${customer_name}.yaml"
+    local descriptor_path="_rendered/customers/${customer_name}/${customer_name}.yaml"
     local descriptor_content
     descriptor_content=$(cat <<YAML
 customerName: ${customer_name}
@@ -487,9 +487,9 @@ gitea:
 YAML
 )
 
-    # Write the descriptor to the local overlay so it is tracked in git and
-    # included in the next cluster-bootstrap / push-to-gitea push.
-    local local_descriptor_dir="${overlay_dir}/customers/${customer_name}"
+    # Write the descriptor to the local overlay under _rendered/customers/ so it
+    # is included in the next push-to-gitea push and matches the ArgoCD-watched path.
+    local local_descriptor_dir="${overlay_dir}/_rendered/customers/${customer_name}"
     local local_descriptor_file="${local_descriptor_dir}/${customer_name}.yaml"
     mkdir -p "$local_descriptor_dir"
     printf '%s' "$descriptor_content" > "$local_descriptor_file"
@@ -624,7 +624,7 @@ EOF
     log_success "  Namespace    : ${namespace}  (ArgoCD will create it on first sync)"
     log_success "  Ingress      : https://${ingress_host}"
     log_success "  AppProject   : customer-${customer_name}  (scoped to ${org_name}-* namespaces)"
-    log_success "  Descriptor   : customers/${customer_name}/${customer_name}.yaml  (in cluster-services)"
+    log_success "  Descriptor   : _rendered/customers/${customer_name}/${customer_name}.yaml  (in cluster-services)"
     log_success ""
     log_success "Next steps:"
     log_success "  1. The 'customer-apps' ApplicationSet will scan org '${org_name}' within"
