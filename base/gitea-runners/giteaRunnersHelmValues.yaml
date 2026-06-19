@@ -1,0 +1,128 @@
+enabled: true
+
+giteaRootURL: "https://${GITEA_DOMAIN_NAME}"
+
+existingSecret: runner-registration-token
+existingSecretKey: token
+
+global:
+  storageClass: globalenc-1replica-notretained
+
+statefulset:
+  replicas: "${GITEA_RUNNERS_REPLICAS}"
+
+  persistence:
+    size: "${GITEA_RUNNERS_STORAGE_SIZE}"
+
+  securityContext:
+    fsGroup: 1000
+
+  extraVolumes:
+    - name: cluster-ca
+      configMap:
+        name: cluster-ca-bundle
+        items:
+          - key: ca.crt
+            path: cluster-ca.crt
+
+  dind:
+    rootless: true
+    uid: 1000
+    tag: "${GITEA_RUNNERS_DIND_IMAGE_TAG}" #https://hub.docker.com/_/docker/tags?name=dind-rootless
+    extraEnvs:
+      - name: DOCKER_HOST
+        value: "unix:///run/user/1000/docker.sock"
+    extraVolumeMounts:
+      - name: cluster-ca
+        mountPath: /etc/ssl/certs/cluster-ca.crt
+        subPath: cluster-ca.crt
+        readOnly: true
+    resources:
+      requests:
+        memory: "${GITEA_RUNNERS_DIND_MEMORY_REQUEST}"
+        cpu: "${GITEA_RUNNERS_DIND_CPU_REQUEST}"
+      limits:
+        memory: "${GITEA_RUNNERS_DIND_MEMORY_LIMIT}"
+        cpu: "${GITEA_RUNNERS_DIND_CPU_LIMIT}"
+
+  runner:
+    tag: "${GITEA_RUNNERS_IMAGE_TAG}" #https://hub.docker.com/r/gitea/act_runner/tags
+    extraEnvs:
+      - name: "GITEA_RUNNER_NAME"
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.name
+    extraVolumeMounts:
+      - name: cluster-ca
+        mountPath: /etc/ssl/certs/cluster-ca.crt
+        subPath: cluster-ca.crt
+        readOnly: true
+      # Mount the DinD socket at the path DinD itself uses, so act_runner asks
+      # DinD to bind-mount a path it can actually find in its own filesystem.
+      # Without this, DinD looks for /var/run/docker.sock (the runner-side path)
+      # and fails, leaving job containers with no Docker socket.
+      - name: docker-socket
+        mountPath: /run/user/1000/docker.sock
+        subPath: docker.sock
+    resources:
+      requests:
+        memory: "${GITEA_RUNNERS_RUNNER_MEMORY_REQUEST}"
+        cpu: "${GITEA_RUNNERS_RUNNER_CPU_REQUEST}"
+      limits:
+        memory: "${GITEA_RUNNERS_RUNNER_MEMORY_LIMIT}"
+        cpu: "${GITEA_RUNNERS_RUNNER_CPU_LIMIT}"
+
+    config: |
+      log:
+        level: info
+
+      runner:
+        file: .runner
+        capacity: 4
+        env_file: .env
+        timeout: 3h
+        shutdown_timeout: 3h
+        insecure: false
+        fetch_timeout: 5s
+        fetch_interval: 2s
+        labels:
+          - "ubuntu-latest:docker://docker.gitea.com/runner-images:ubuntu-latest"
+          - "ubuntu-26.04:docker://docker.gitea.com/runner-images:ubuntu-26.04"
+          - "ubuntu-24.04:docker://docker.gitea.com/runner-images:ubuntu-24.04"
+          - "ubuntu-22.04:docker://docker.gitea.com/runner-images:ubuntu-22.04"
+
+      cache:
+        enabled: false
+
+      container:
+        require_docker: true
+        docker_host: "unix:///run/user/1000/docker.sock"
+        docker_timeout: 300s
+        privileged: false
+        valid_volumes:
+          - /etc/ssl/certs
+          - /etc/ssl/certs/**
+          - /etc/ssl/certs/cluster-ca.crt
+        force_pull: true
+        force_rebuild: false
+
+preExtraInitContainers:
+  - name: setup-env-file
+    image: busybox:1.38.0
+    command:
+      - sh
+      - -c
+      - |
+        cd /data
+        rm -f .env
+        printf 'KUBERNETES_SERVICE_PORT=%s\n' "$KUBERNETES_SERVICE_PORT" >> .env
+        printf 'KUBERNETES_SERVICE_HOST=%s\n' "$KUBERNETES_SERVICE_HOST" >> .env
+        SA_TOKEN="/var/run/secrets/kubernetes.io/serviceaccount/token"
+        if [ -f "$SA_TOKEN" ]; then
+          printf 'KUBE_SA_TOKEN=%s\n' "$(cat "$SA_TOKEN")" >> .env
+        fi
+        echo "Created .env (KUBE_SA_TOKEN redacted):"
+        grep -v KUBE_SA_TOKEN /data/.env
+    volumeMounts:
+      - name: data-runner
+        mountPath: /data
