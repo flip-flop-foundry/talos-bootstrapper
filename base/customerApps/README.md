@@ -4,8 +4,11 @@ This directory contains the `customer-apps` ApplicationSet, which is the GitOps 
 
 ## Provisioning a New Customer
 
+Use the **Bootstrap Customer** VS Code task in the devenv workspace (or run
+`bootstrap-customer.sh` directly from `devenv/.vscode/tasks/`):
+
 ```bash
-./adminTasks/bootstrap-customer.sh overlays/<cluster>/<cluster>.env <customer-name> [OPTIONS]
+$devenv/.vscode/tasks/bootstrap-customer.sh <env-name> <customer-name> [OPTIONS]
 ```
 
 **Options:**
@@ -24,16 +27,16 @@ This directory contains the `customer-apps` ApplicationSet, which is the GitOps 
 
 ```bash
 # Minimal — uses all defaults
-./adminTasks/bootstrap-customer.sh overlays/mycluster/mycluster.env acme
+$devenv/.vscode/tasks/bootstrap-customer.sh mycluster acme
 
 # Custom org/repo names
-./adminTasks/bootstrap-customer.sh overlays/mycluster/mycluster.env acme \
+$devenv/.vscode/tasks/bootstrap-customer.sh mycluster acme \
   --org-name acme-corp \
   --repo-name api \
   --ingress-host api.acme.example.com
 
 # Re-run safely — all steps are idempotent
-./adminTasks/bootstrap-customer.sh overlays/mycluster/mycluster.env acme
+$devenv/.vscode/tasks/bootstrap-customer.sh mycluster acme
 ```
 
 ---
@@ -76,7 +79,7 @@ gitea:
   orgName: acme
 ```
 
-This file is also written **locally** to `overlays/<cluster>/customers/<customerName>/<customerName>.yaml` so it is tracked in the cluster repo and included automatically in every future `push-to-gitea` / `cluster-bootstrap` run.
+This file is also written **locally** to `$env/_rendered/customers/<customerName>/<customerName>.yaml` so it is included in the next push to Gitea by the "Render and Push to Gitea" task and picked up by every subsequent `Apply Overlay` run.
 
 The ApplicationSet Git generator reads `customers/*/*.yaml` to discover which orgs to scan. Adding this file is what triggers ArgoCD to start watching the customer's org.
 
@@ -97,7 +100,7 @@ Creates the initial namespace `<orgName>-<repoName>` and sets up:
 
 **Image pull secret:** Creates a `kubernetes.io/dockerconfigjson` secret (`gitea-registry-pull`) in the namespace using the `registry-pull` service account credentials, and patches the `default` ServiceAccount to reference it as an `imagePullSecret`. This ensures all pods in the namespace can pull images from the Gitea container registry without needing explicit `imagePullSecrets` in each Deployment spec.
 
-> **Note:** The cluster-wide `RegistryAuthConfig` (applied by `apply-node-registry-config.sh`) is also configured on every Talos node, but due to a containerd v2 limitation it does not take effect when `config_path` is also set (which it is, from `RegistryTLSConfig`). The Kubernetes imagePullSecret on the `default` ServiceAccount is therefore the reliable mechanism.
+> **Note:** The cluster-wide `RegistryAuthConfig` (applied by the "Apply Node Registry Config" task) is also configured on every Talos node, but due to a containerd v2 limitation it does not take effect when `config_path` is also set (which it is, from `RegistryTLSConfig`). The Kubernetes imagePullSecret on the `default` ServiceAccount is therefore the reliable mechanism.
 
 ### Step 7 — CI service user + Actions secrets
 
@@ -113,7 +116,7 @@ Creates a dedicated CI service user `ci-<orgName>` with write access to the org,
 Once the descriptor is committed to `cluster-services`, the automated flow takes over:
 
 ```
-bootstrap-customer.sh commits customers/acme/acme.yaml
+bootstrap-customer.sh commits _rendered/customers/acme/acme.yaml
         │
         ▼
 customer-apps ApplicationSet (polls every ~3 min)
@@ -161,7 +164,7 @@ The `customer-apps` ApplicationSet uses a **Matrix generator** combining two chi
 
 **Matrix output:** One set of parameters per `(customer descriptor × matching repo)`. A customer org with three repos each containing `deploy/` will produce three ArgoCD Applications.
 
-**Adding a new repo** to an existing customer's org: simply create the repo with a `deploy/` directory. The ApplicationSet discovers it on the next poll (~3 minutes) and creates an Application automatically — no re-running `bootstrap-customer.sh` required.
+**Adding a new repo** to an existing customer's org: simply create the repo with a `deploy/` directory. The ApplicationSet discovers it on the next poll (~3 minutes) and creates an Application automatically — no re-running the Bootstrap Customer task required.
 
 ---
 
@@ -181,18 +184,18 @@ The `customer-apps` ApplicationSet uses a **Matrix generator** combining two chi
 
 ## Prerequisites
 
-Before running `bootstrap-customer.sh`, the cluster must be fully bootstrapped:
+Before running the Bootstrap Customer task, the cluster must be fully bootstrapped:
 
-- Gitea running and bootstrapped (`gitea-bootstrap.sh` has been run)
-- The `registry-pull` Gitea user and `gitea/gitea-registry-pull-credentials` K8s secret must exist (created by `gitea-bootstrap.sh`)
-- The `customer-apps` ApplicationSet deployed (done by `cluster-bootstrap.sh`)
-- ArgoCD connected to Gitea (done by `cluster-bootstrap.sh`)
+- Gitea running and bootstrapped (the "Apply Overlay" task has completed at least once, including its `gitea-bootstrap.sh` step)
+- The `registry-pull` Gitea user and `gitea/gitea-registry-pull-credentials` K8s secret must exist (also created during the Apply Overlay flow)
+- The `customer-apps` ApplicationSet deployed (done by Apply Overlay)
+- ArgoCD connected to Gitea (done by Apply Overlay)
 
 ---
 
 ## Re-running Safely
 
-All steps in `bootstrap-customer.sh` are idempotent:
+All steps in the Bootstrap Customer task are idempotent:
 - Existing Gitea org/repo → skipped (use `--force-recreate` to replace)
 - Existing K8s secrets and namespaces → skipped
 - Existing Gitea org memberships → silently succeed
@@ -205,7 +208,7 @@ It is safe to re-run the script at any time to repair a partial bootstrap or to 
 
 ## Information for Customer Developers
 
-The [example-gitops-customer](../../../../example-gitops-customer/README.md) template repository contains a developer-facing README that `bootstrap-customer.sh` substitutes with real values (org name, namespace, ArgoCD project, ingress URL, CI variables, etc.) when it pushes the template to the customer's Gitea repo.
+The [example-gitops-customer](../../../../example-gitops-customer/README.md) template repository contains a developer-facing README that the Bootstrap Customer task substitutes with real values (org name, namespace, ArgoCD project, ingress URL, CI variables, etc.) when it pushes the template to the customer's Gitea repo.
 
 **The README a developer receives is therefore already customer-specific** — they see their actual namespace, project name, image registry path, and live URL rather than placeholder text.
 

@@ -25,11 +25,11 @@ KubeVirt is **excluded by default** in the example overlays. To enable it:
 
 1. Remove `"kubevirt"` from the `EXCLUDED_BASE` array in your overlay's `.env` file.
 2. Ensure `KUBEVIRT_VERSION` and `KUBEVIRT_NAMESPACE` are exported (they are pre-defined in the example `.env` files).
-3. Re-render: `./adminTasks/render-overlay.sh overlays/<cluster>/<cluster>.env`
-4. For new clusters, `cluster-bootstrap.sh` deploys the ArgoCD Application automatically.
+3. Re-render via the "Render Overlay" VS Code task (or run `render-overlay.sh` from the devenv workspace).
+4. For new clusters, the "Apply Overlay" task (`cluster-bootstrap.sh` in the devenv workspace) deploys the ArgoCD Application automatically.
 5. For existing clusters, apply the ArgoCD Application:
    ```bash
-   kubectl apply -f rendered/<cluster>/kubevirt/kubevirtArgoApp.yaml
+   kubectl apply -f $env/_rendered/kubevirt/kubevirtArgoApp.yaml
    ```
 
 ## Upgrading

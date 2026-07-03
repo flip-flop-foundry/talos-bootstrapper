@@ -1,65 +1,82 @@
 # Talos Kubernetes Bootstrapper
 
-GitOps-based Talos Kubernetes cluster bootstrapper. Automates provisioning of production-grade K8s clusters from bare metal to fully operational, using a three-tier templating system and ArgoCD for ongoing management.
+GitOps-based Talos Kubernetes cluster bootstrapper. Provides the **base templates + docs** for provisioning production-grade K8s clusters from bare metal to fully operational, using a three-tier templating system and ArgoCD for ongoing management.
 
-## Usage Modes
+> **This repository holds only the base component templates.** The bootstrap tooling (scripts, VS Code tasks, devcontainer) lives in a separate workspace repo:
+> **[flip-flop-foundry/talos-bootstrapper-devenv](https://github.com/flip-flop-foundry/talos-bootstrapper-devenv)**.
+>
+> Environment definitions (your private `<env>.env` file, per-node patches, rendered manifests) live in per-environment git repos that you import into the devenv workspace.
 
-### Mode A — Submodule (recommended)
-
-Keeps sensitive cluster configuration in a **private cluster repo** and uses this repo as a git submodule. Scripts and base templates remain public; overlays (with passwords, CIDRs, domain names) stay private.
+## How the Three Repos Fit Together
 
 ```
-my-cluster-repo/            # Private git repo
-├── talos-bootstraper/      # This repo as a git submodule
-│   ├── adminTasks/
-│   └── base/
-├── overlays/               # Your private cluster configs
-│   └── mycluster/
-│       └── mycluster.env
-└── rendered/               # Gitignored output
+┌──────────────────────────────────────────────────────────────────┐
+│  talos-bootstrapper-devenv (public)                              │
+│  The workspace. Devcontainer + VS Code tasks that call:          │
+│    .vscode/tasks/render-overlay.sh                               │
+│    .vscode/tasks/cluster-initialSetup.sh                         │
+│    .vscode/tasks/cluster-bootstrap.sh                            │
+│    .vscode/tasks/bootstrap-customer.sh                           │
+│    ... etc.                                                      │
+└──────────────────────────────────────────────────────────────────┘
+                              │
+                              ├─── consumes ──► ┌───────────────────────────────┐
+                              │                 │  talos-bootstraper (this repo)│
+                              │                 │  base/  — component templates │
+                              │                 │  docs   — this README, etc.   │
+                              │                 └───────────────────────────────┘
+                              │
+                              └─── imports ───► ┌───────────────────────────────┐
+                                                │  <env>-cluster-repo (private) │
+                                                │  <env>.env                    │
+                                                │  talos/nodes/*.yaml           │
+                                                │  _rendered/  (output)         │
+                                                │  <component>/  (overlays)     │
+                                                └───────────────────────────────┘
 ```
 
-**Quick start:**
+At runtime the devenv container mounts a shared data volume at `$TALOS_BOOTSTRAPPER_DATA_DIR` (default `/workspaces/talos-bootstrapper-data`) that contains:
 
-Fork https://github.com/flip-flop-foundry/talos-bootstraper-cluster-repo-example
-
-Follow the README.md in that repo to get started
-
-### Mode B — Single repo (original)
-
-Clone this repo directly and create overlays inside it. Simpler setup, but your cluster configuration lives in the same repo as the scripts.
-
-```bash
-# 1. Copy an example overlay
-cp -r overlays/yourCluster-l2 overlays/mycluster
-mv overlays/mycluster/yourCluster-l2.env overlays/mycluster/mycluster.env
-
-# 2. Edit the env file, then run the scripts
-./adminTasks/cluster-initialSetup.sh overlays/mycluster/mycluster.env
-./adminTasks/render-overlay.sh overlays/mycluster/mycluster.env
-./adminTasks/cluster-bootstrap.sh overlays/mycluster/mycluster.env
 ```
+$TALOS_BOOTSTRAPPER_DATA_DIR/
+├── talos-bootstraper/       # This repo, cloned once
+└── environments/            # One directory per imported environment
+    └── <env>/
+        ├── <env>.env        # All cluster config for that env
+        ├── talos/           # Machine configs + secrets (secrets gitignored)
+        ├── <component>/     # Per-env overlay files
+        └── _rendered/       # Output of render-overlay.sh — pushed to Gitea
+```
+
+## Quick Start
+
+1. Open the [talos-bootstrapper-devenv](https://github.com/flip-flop-foundry/talos-bootstrapper-devenv) repo in a devcontainer (VS Code will offer to reopen automatically).
+2. Run the **Import environment** VS Code task and provide the git URL of your private env repo. See the [talos-bootstraper-cluster-repo-example](https://github.com/flip-flop-foundry/talos-bootstraper-cluster-repo-example) for a working env-repo template.
+3. From the picker in every subsequent task, select your imported environment.
+4. Typical order for a new cluster: **Set Active Talos/Kube Context** → **Apply Talos configs** → (automatic hand-off into cluster bootstrap and Gitea setup).
 
 ## Architecture
 
 ```
-base/                    # Component templates with ${VAR} placeholders
-overlays/                # Mode A: example overlays in this repo; Mode B: real cluster overlays live here
+base/                    # Component templates with ${VAR} placeholders (this repo)
+overlays/                # Example overlays only — see the cluster-repo-example for real usage
   <cluster>/
-    <cluster>.env        # All cluster configuration for that cluster overlay
-    talos/               # Generated Talos machine configs + optional cluster/node patch files
-rendered/                # OUTPUT (gitignored) — final manifests after rendering
-adminTasks/              # Bootstrap and rendering scripts
-  lib/                   # Shared shell libraries
-  pxe/                   # iPXE network boot infrastructure (Docker-based)
+    <cluster>.env
+    talos/
+
+# In each imported environment (under $TALOS_BOOTSTRAPPER_DATA_DIR/environments/<env>/):
+<env>.env                # All cluster configuration
+talos/                   # Generated Talos machine configs + optional cluster/node patch files
+<component>/             # Per-env overlay YAMLs
+_rendered/               # OUTPUT — final manifests after rendering (pushed to Gitea)
 ```
 
 ### Rendering Pipeline
 
 ```
 base/<component>/*.yaml  ──┐
-                            ├──> yq merge (overlay wins) ──> envsubst ──> rendered/<cluster>/
-overlays/<cluster>/<component>/*.yaml ─┘
+                            ├──> yq merge (overlay wins) ──> envsubst ──> $env/_rendered/<component>/
+$env/<component>/*.yaml ─┘
 ```
 
 The `EXCLUDED_BASE` array in each `.env` file controls which components or files are skipped during rendering. Matching is done on the rendered output path, so it applies to base files, overlay files, and merged files.
@@ -258,8 +275,10 @@ Instead of manually flashing USB sticks with Talos, nodes can PXE boot directly 
 
 ### Setup
 
+Run the **Setup PXE Server** VS Code task (or invoke directly):
+
 ```bash
-./adminTasks/pxe-setup.sh overlays/<cluster>/<cluster>.env
+$devenv/.vscode/tasks/pxe-setup.sh <env-name>
 ```
 
 This single command:
@@ -297,8 +316,10 @@ export TALOS_SCHEMATIC_EXTRA_KERNEL_ARGS=("net.ifnames=0")       # Extra kernel 
 
 ### Infrastructure
 
+The PXE folder lives at the root of the devenv workspace (`devenv/pxe/`):
+
 ```
-adminTasks/pxe/
+devenv/pxe/
   docker-compose.yml         # nginx (HTTP) + dnsmasq (TFTP, two profiles)
   nginx.conf                 # Static file server for boot assets
   ipxe-boot.ipxe.template    # iPXE boot script template

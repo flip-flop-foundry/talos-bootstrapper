@@ -11,50 +11,67 @@ GitOps-based Talos Kubernetes cluster bootstrapper. Automates provisioning of pr
 
 ## Usage Modes
 
-Each cluster overlay is a separate git repository, registered as a submodule inside a private **cluster repo**. Sensitive cluster configuration (passwords, CIDRs, node names) stays private; scripts and base templates remain public.
+The tooling lives in a separate **devenv** workspace ([talos-bootstrapper-devenv](https://github.com/flip-flop-foundry/talos-bootstrapper-devenv)). This repo (`talos-bootstraper`) provides the `base/` component templates + docs only. Each environment (a cluster) is a **private git repo** imported into the devenv workspace at runtime.
 
-### Submodule Layout
+### Layout at runtime
 
+Inside the devcontainer, the mounted data volume looks like:
 
 ```
-my-cluster-repo/            # Private cluster repo
-├── talos-bootstraper/      # This repo as a git submodule
-│   ├── adminTasks/         # Scripts
-│   ├── base/               # Cluster-agnostic templates
-├── overlays/               # Cluster-specific configs (private)
-│   └── mycluster/
-│       └── mycluster.env
-│       └── _rendered/       # Rendered output (inside each overlay)
+$TALOS_BOOTSTRAPPER_DATA_DIR/                     # default: /workspaces/talos-bootstrapper-data
+├── talos-bootstraper/                            # this repo, cloned once
+│   └── base/                                     # component templates
+└── environments/                                 # one dir per imported env
+    └── <env>/                                    # imported via the "Import environment" task
+        ├── <env>.env                             # all cluster config
+        ├── talos/                                # generated machine configs + secrets
+        ├── <component>/                          # per-env overlay files
+        └── _rendered/                            # output of render-overlay.sh
 ```
 
-Scripts are invoked from the cluster repo root:
+Every bootstrap script lives at `<devenv>/.vscode/tasks/*.sh` and is invoked either via the matching VS Code task or directly with `<env-name>` as the first arg:
+
 ```bash
-./talos-bootstraper/adminTasks/render-overlay.sh overlays/mycluster/mycluster.env
+$devenv/.vscode/tasks/render-overlay.sh $env/<env>.env
+$devenv/.vscode/tasks/cluster-initialSetup.sh <env-name>
+$devenv/.vscode/tasks/cluster-bootstrap.sh <env-name>
 ```
 
-See [talos-bootstraper-cluster-repo-example](https://github.com/flip-flop-foundry/talos-bootstraper-cluster-repo-example) for a complete working example.
+See [talos-bootstraper-cluster-repo-example](https://github.com/flip-flop-foundry/talos-bootstraper-cluster-repo-example) for a working env-repo template.
 
 
 ## Directory Structure
 
+In **this repo** (`talos-bootstraper`):
+
 ```
 base/                    # Component templates with ${VAR} placeholders (cluster-agnostic)
-overlays/
-  <cluster>/              # Each overlay is a separate git submodule
-    _rendered/          # OUTPUT — final manifests after envsubst + yq merge
-    <cluster>.env        # All cluster config: versions, CIDRs, domains, node lists
-    talos/               # Generated Talos machine configs + secrets
-      nodes/             # Optional per-node YAML patches (merged by hostname)
-adminTasks/              # Bootstrap and rendering scripts
+overlays/                # Example overlays only — see the cluster-repo-example for real usage
+```
+
+In each **imported env** (under `$TALOS_BOOTSTRAPPER_DATA_DIR/environments/<env>/`):
+
+```
+<env>.env                # All cluster config: versions, CIDRs, domains, node lists
+talos/                   # Generated Talos machine configs + secrets
+  nodes/                 # Optional per-node YAML patches (merged by hostname)
+<component>/             # Per-env overlay files
+_rendered/               # OUTPUT — final manifests after envsubst + yq merge
+```
+
+In the **devenv workspace** (a separate repo):
+
+```
+.vscode/tasks/           # All bootstrap and rendering scripts
   lib/                   # Shared shell libraries (logging, k8s helpers, API clients)
-  pxe/                   # iPXE network boot infrastructure (Docker-based)
+pxe/                     # iPXE network boot infrastructure (Docker-based)
 ```
 
 ### Base Components (base/)
 
 Each subdirectory is a self-contained component:
 argocd, cert-manager, cilium, cluster-wide, cnpg, csi-snapshot-controller, external-dns,
-gitea, gitea-runners, kubevirt,kubevirt-manager, cdi longhorn, metrics-server, nidhogg, reloader, spegel, talos, traefik
+gitea, gitea-runners, kubevirt,kubevirt-manager, cdi, longhorn, metrics-server, nidhogg, reloader, spegel, talos, traefik
 
 ## Templating System
 
@@ -67,11 +84,15 @@ gitea, gitea-runners, kubevirt,kubevirt-manager, cdi longhorn, metrics-server, n
 
 ```
 base/<component>/*.yaml  ──┐
-                            ├──> yq merge (overlay wins) ──> envsubst ──> overlays/<cluster>/_rendered/<component>/
-overlays/<cluster>/<component>/*.yaml ─┘
+                            ├──> yq merge (overlay wins) ──> envsubst ──> $env/_rendered/<component>/
+$env/<component>/*.yaml ─┘
 ```
 
-Run: `./adminTasks/render-overlay.sh overlays/<cluster>/<cluster>.env`
+Run via the **Render Overlay** VS Code task, or directly:
+
+```bash
+$devenv/.vscode/tasks/render-overlay.sh $env/<env>.env
+```
 
 ## File Naming Conventions
 
@@ -155,19 +176,30 @@ Each cluster has one `.env` file exporting all configuration. Key variable group
 
 ## Key Scripts Reference
 
-| Script | Purpose |
-|--------|---------|
-| `adminTasks/render-overlay.sh` | Template renderer: envsubst + yq merge → _rendered/ (inside overlay) |
-| `adminTasks/cluster-bootstrap.sh` | Full bootstrap orchestrator |
-| `adminTasks/cluster-initialSetup.sh` | Install prerequisites, generate Talos configs |
-| `adminTasks/gitea-bootstrap.sh` | Create Gitea org/repo, push code, setup ArgoCD creds |
-| `adminTasks/lib/logging.sh` | Colored output (INFO, SUCCESS, WARN, ERROR) |
-| `adminTasks/lib/kubernetes.sh` | kubectl/secret/credential utilities |
-| `adminTasks/lib/gitea-api.sh` | Gitea REST API operations |
-| `adminTasks/lib/argocd-api.sh` | ArgoCD pod access and login |
-| `adminTasks/lib/disk-detection.sh` | Longhorn disk auto-discovery |
-| `adminTasks/pxe-setup.sh` | iPXE network boot setup: schematic, assets, firmware, Docker |
-| `adminTasks/lib/image-factory.sh` | Talos Image Factory API: schematics, asset downloads, iPXE build |
+All scripts live in the devenv workspace at `<devenv>/.vscode/tasks/`. Each corresponds to a VS Code task (label in parentheses).
+
+| Script | VS Code task | Purpose |
+|--------|--------------|---------|
+| `render-overlay.sh` | Render Overlay | Template renderer: envsubst + yq merge → `$env/_rendered/` |
+| `push-to-gitea.sh` | Render and Push to Gitea | Push `$env/_rendered/` to Gitea (non-force, scoped) |
+| `cluster-initialSetup.sh` | Apply Talos configs | Install prerequisites, generate + apply Talos machine configs |
+| `cluster-bootstrap.sh` | Apply Overlay | Full cluster bootstrap orchestrator |
+| `gitea-bootstrap.sh` | (called by Apply Overlay) | Create Gitea org/repo, push code, set up ArgoCD creds |
+| `pxe-setup.sh` | Setup PXE Server | iPXE network boot setup: schematic, assets, firmware, Docker |
+| `apply-node-registry-config.sh` | Apply Node Registry Config | Apply RegistryTLSConfig + RegistryAuthConfig to all nodes |
+| `bootstrap-customer.sh` | Bootstrap Customer | Provision a new customer (Gitea org + repo + AppProject) |
+| `reset-talos-nodes.sh` | Reset Talos Node System Volumes | Interactive node reset (STATE + EPHEMERAL) |
+| `prepare-node-for-downtime.sh` | Prepare Node for Downtime | Cordon + drain a node safely (KubeVirt, CNPG, Longhorn aware) |
+| `set-active-talos-kube-context.sh` | Set Active Talos/Kube Context | Point `TALOSCONFIG`/`KUBECONFIG` at the chosen env |
+| `generate-image-urls.sh` | Generate Talos Image URLs | Print Talos Image Factory URLs for the chosen env |
+| `import-environment.sh` | Import environment | Clone a private env repo into the devenv workspace |
+| `lib/logging.sh` | — | Colored output (INFO, SUCCESS, WARN, ERROR) |
+| `lib/kubernetes.sh` | — | kubectl/secret/credential utilities |
+| `lib/gitea-api.sh` | — | Gitea REST API operations |
+| `lib/argocd-api.sh` | — | ArgoCD pod access and login |
+| `lib/disk-detection.sh` | — | Longhorn disk auto-discovery |
+| `lib/image-factory.sh` | — | Talos Image Factory API: schematics, asset downloads, iPXE build |
+| `lib/talos.sh` | — | Talos node config/apply/wait helpers |
 
 ## Helm Charts & Repos
 
@@ -227,7 +259,7 @@ Advertises LoadBalancer IPs via eBGP to an external router. IPs can be any routa
 
 Optional PXE boot infrastructure for automated Talos OS installation on bare metal nodes.
 
-**Setup**: `./adminTasks/pxe-setup.sh overlays/<cluster>/<cluster>.env`
+**Setup**: run the **Setup PXE Server** VS Code task (or `$devenv/.vscode/tasks/pxe-setup.sh <env-name>` directly).
 
 This creates a Talos Image Factory schematic, downloads kernel/initramfs assets, generates boot scripts, and starts Docker containers for serving the boot environment.
 
@@ -238,7 +270,7 @@ This creates a Talos Image Factory schematic, downloads kernel/initramfs assets,
 | **Manual DHCP** (`TALOS_PXE_PROXY_DHCP_ENABLED=false`) | PXE server on different subnet from nodes, or router supports DHCP options | Builds custom iPXE firmware with embedded chainload script. Router DHCP options 66 (next-server) + 67 (boot file) point to TFTP server. TFTP serves `ipxe.efi` → chains to HTTP boot script → loads kernel + initramfs |
 | **ProxyDHCP** (`TALOS_PXE_PROXY_DHCP_ENABLED=true`) | PXE server on same subnet as nodes, no router config needed | dnsmasq runs as proxyDHCP alongside existing DHCP. Broadcasts boot info (next-server + boot script URL) without assigning IPs |
 
-### PXE Infrastructure (`adminTasks/pxe/`)
+### PXE Infrastructure (`devenv/pxe/`)
 
 ```
 pxe/
@@ -259,15 +291,16 @@ pxe/
 
 ## How to Add a New Cluster
 
-Create the cluster overlay in your private cluster repo:
+Create the env repo, then import it into the devenv workspace:
 
-1. Fork or clone [talos-bootstraper-cluster-repo-example](https://github.com/flip-flop-foundry/talos-bootstraper-cluster-repo-example) as your private cluster repo.
-2. Create `overlays/<cluster>/<cluster>.env` in your cluster repo (copy and customize from the example).
-3. Update: `OVERLAY_NAME`, `CLUSTER_EXTERNAL_DOMAIN`, CIDRs, node hostnames, versions.
-4. Choose LoadBalancer mode and configure `EXCLUDED_BASE` accordingly (see above).
-5. Create `overlays/<cluster>/talos/` with generated machine configs.
-6. Run `./talos-bootstraper/adminTasks/render-overlay.sh overlays/<cluster>/<cluster>.env`.
-7. Run `./talos-bootstraper/adminTasks/cluster-bootstrap.sh overlays/<cluster>/<cluster>.env`.
+1. Fork or clone [talos-bootstraper-cluster-repo-example](https://github.com/flip-flop-foundry/talos-bootstraper-cluster-repo-example) as your private env repo.
+2. Edit `<env>.env` at the root: `OVERLAY_NAME`, `CLUSTER_EXTERNAL_DOMAIN`, CIDRs, node hostnames, versions.
+3. Choose LoadBalancer mode and configure `EXCLUDED_BASE` accordingly (see above).
+4. Push the env repo to a git host reachable from the devenv container.
+5. In the devenv workspace, run the **Import environment** VS Code task and paste the git URL.
+6. Run the **Apply Talos configs** task (or `$devenv/.vscode/tasks/cluster-initialSetup.sh <env-name>`) — it renders, generates machine configs, applies them, and chains into **Apply Overlay** which brings up Cilium/ArgoCD/Gitea.
+
+For detailed instructions, see the README.md in the example repo and this repo's `.github/copilot-instructions.md`.
 
 For detailed instructions, see the README.md in the example repo and this repo's `.github/copilot-instructions.md`.
 
@@ -297,7 +330,7 @@ These patches are deep-merged (patch wins) into the generated machine config dur
 ### Example — Disable hugepages on Raspberry Pi nodes
 
 ```yaml
-# overlays/${SOME_OVERLAY}//talos/nodes/brew-10.yaml
+# overlays/${SOME_OVERLAY}/talos/nodes/brew-10.yaml
 machine:
   sysctls:
     vm.nr_hugepages: "0"
@@ -310,7 +343,7 @@ machine:
 3. Add `<component>HelmValues.yaml` with `${VAR}` placeholders
 4. Add `export COMPONENT_HELM_VERSION="x.y.z"` to each overlay's .env file
 5. Optional: Add overlay-specific overrides in `overlays/<cluster>/<component>/`
-6. Re-render: `./adminTasks/render-overlay.sh overlays/<cluster>/<cluster>.env`
+6. Re-render via the **Render Overlay** VS Code task (or `$devenv/.vscode/tasks/render-overlay.sh $env/<env>.env`).
 
 ## Workload Deployment Standards
 
@@ -393,7 +426,7 @@ spec:
 When writing Helm values for a new component:
 - **Always use the latest chart version** available at the time of writing. Set `export COMPONENT_HELM_VERSION="<latest>"` in every overlay `.env` file.
 - **Only include non-default values.** Do not copy default chart values into the values file unless you have a specific reason to override them (e.g. performance tuning, security hardening, or Talos-specific paths). When overriding a default for a non-obvious reason, add a brief comment explaining why.
-- After writing the values, **render the final manifests** (`./adminTasks/render-overlay.sh`) and inspect every generated resource to confirm it meets the security guidelines above.
+- After writing the values, **render the final manifests** via the **Render Overlay** task and inspect every generated resource to confirm it meets the security guidelines above.
 
 #### Least-Privilege Service Accounts
 
@@ -785,11 +818,12 @@ Keep the dependency lists up to date whenever components are added or removed. Y
 Before raising a pull request, run the following checks inside the agent environment:
 
 ```bash
-# Lint all shell scripts
-shellcheck adminTasks/*.sh adminTasks/lib/*.sh
+# Lint all shell scripts (they live in the devenv workspace, not this repo)
+shellcheck $devenv/.vscode/tasks/*.sh $devenv/.vscode/tasks/lib/*.sh
 
-# Verify the render pipeline is not broken (using an example overlay)
-./adminTasks/render-overlay.sh overlays/yourCluster-l2/yourCluster-l2.env
+# Verify the render pipeline is not broken (using an imported example env)
+$devenv/.vscode/tasks/render-overlay.sh \
+  $TALOS_BOOTSTRAPPER_DATA_DIR/environments/<env>/<env>.env
 ```
 
 When creating or editing a Helm-based component, also run `helm template` to verify the rendered manifests meet the security guidelines:
