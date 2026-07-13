@@ -1,0 +1,39 @@
+# Optional BGP-specific Traefik override
+# Copy this file to overlays/<env>/traefik/traefikHelmValues.yaml only if you
+# explicitly want the Local + affinity design. The base configuration already
+# works for BGP with externalTrafficPolicy: Cluster and no placement coupling.
+
+# This override enables a router-level ECMP optimization. With
+# externalTrafficPolicy: Local, only nodes that already run a Traefik pod should
+# receive ingress traffic. That avoids a second in-cluster hop, but it couples
+# ingress availability to pod placement and replica distribution.
+
+service:
+  spec:
+    # Use Local only when you intentionally want BGP ECMP to land on nodes that
+    # already host Traefik pods.
+    externalTrafficPolicy: Local
+
+affinity:
+  # Pin Traefik to the BGP-speaking control-plane nodes so each advertising node
+  # also has a local backend pod.
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node-role.kubernetes.io/control-plane
+              operator: Exists
+  # Spread exactly one Traefik pod per node so each eligible node contributes a
+  # distinct ECMP next-hop. If replicas > available eligible nodes the excess
+  # pods will remain Pending.
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: traefik
+        topologyKey: kubernetes.io/hostname
+
+tolerations:
+  - key: "node-role.kubernetes.io/control-plane"
+    operator: "Exists"
+    effect: "NoSchedule"
