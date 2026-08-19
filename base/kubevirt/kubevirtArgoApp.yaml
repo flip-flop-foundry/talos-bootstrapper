@@ -30,4 +30,4 @@ spec:
   sources:
     - repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
-      path: rendered/${OVERLAY_NAME}/kubevirt
+      path: _rendered/kubevirt

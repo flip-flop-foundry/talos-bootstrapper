@@ -34,8 +34,8 @@ spec:
       helm:
         releaseName: reloader
         valueFiles:
-          - $values/rendered/${OVERLAY_NAME}/reloader/reloaderValues.yaml
+          - $values/_rendered/reloader/reloaderValues.yaml
     - repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
       ref: values
-      path: rendered/${OVERLAY_NAME}/reloader
+      path: _rendered/reloader

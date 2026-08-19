@@ -1,3 +1,11 @@
+deployment:
+  replicas: ${TRAEFIK_REPLICAS}
+
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+
 ingressClass:  # @schema additionalProperties: false
   enabled: true
   isDefaultClass: false
@@ -15,11 +23,6 @@ ingressRoute:
     middlewares:
       - name: dashboard-auth    
 
-tolerations:
-  - key: "node-role.kubernetes.io/control-plane"
-    operator: "Exists"
-    effect: "NoSchedule"
-
 service:
   enabled: true
   single: true  # One Service for both TCP and UDP
@@ -27,26 +30,42 @@ service:
   annotations:
     advertise-via-dns: "true"  # Critical for ExternalDNS management
     external-dns.alpha.kubernetes.io/hostname: traefik.${CLUSTER_EXTERNAL_DOMAIN}  # Critical for ExternalDNS management
+  spec:
+    # Use Cluster policy as the safe default for both L2 and BGP when Traefik
+    # pods are free to schedule anywhere. Any eligible ingress node can receive
+    # traffic and Cilium will forward to any ready backend pod, local or remote.
+    # BGP users can opt into Local + affinity as a deliberate ECMP optimization.
+    # See templates/yourCluster-bgp/ for the optional override.
+    externalTrafficPolicy: Cluster
 
 ports:
   web:
     expose:
       default: true
     exposedPort: 80
-    # Global HTTP → HTTPS redirect. Implemented as a lowest-priority catch-all router,
-    # so any explicit IngressRoute/Ingress on the 'web' entrypoint will take precedence
-    # and bypass this redirect (opt-out by defining an explicit HTTP route).
-    redirections:
-      entryPoint:
-        to: websecure
-        scheme: https
-        permanent: true
+    http:
+      # Global HTTP → HTTPS redirect. Implemented as a lowest-priority catch-all router,x
+      # so any explicit IngressRoute/Ingress on the 'web' entrypoint will take precedence
+      # and bypass this redirect (opt-out by defining an explicit HTTP route).
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
   websecure:
     expose:
       default: true
     exposedPort: 443
-    tls:
-      enabled: true
+    http:
+      tls:
+        enabled: true
+    transport:
+      # Increase timeouts to accommodate long-running requests (e.g. large file uploads, long API calls).
+      # Needed by among other things immich.
+      respondingTimeouts:
+        readTimeout: 600s
+        writeTimeout: 600s
+        idleTimeout: 600s
 
 # Enforce TLS 1.2+ and forward-secrecy-only cipher suites cluster-wide.
 # The 'default' TLSOption applies to all routes that don't reference their own option.

@@ -53,7 +53,7 @@ Reloader will detect the change and perform a rolling restart automatically.
 
 ### Pushing code changes to the cluster's Gitea
 
-During bootstrap, `adminTasks/gitea-bootstrap.sh` creates the organisation, repository, and ArgoCD credentials. For subsequent pushes:
+During bootstrap, the "Apply Overlay" task's `gitea-bootstrap.sh` step (in the devenv workspace) creates the organisation, repository, and ArgoCD credentials. For subsequent pushes:
 
 ```bash
 git remote add gitea https://<GITEA_DOMAIN_NAME>/<org>/<repo>.git

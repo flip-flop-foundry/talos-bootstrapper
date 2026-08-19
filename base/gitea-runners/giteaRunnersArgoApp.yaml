@@ -1,3 +1,4 @@
+#TODO See if this new chart can be used: https://gitea.com/gitea/helm-actions
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -24,10 +25,30 @@ spec:
         factor: 2
         maxDuration: 10m
   sources:
+
+    - repoURL: https://gitea.com/anders.eficode/helm-actions-hostusers.git
+      path: .
+      targetRevision: main
+      helm:
+        releaseName: gitea-runners
+        valueFiles:
+          - $values/_rendered/gitea-runners/giteaRunnersHelmValues.yaml
+
+    # Switch to below once merged: https://gitea.com/gitea/helm-actions/pulls/160
+    # Switch to below once merged: https://gitea.com/gitea/helm-actions/pulls/160
+    # Switch to below once merged: https://gitea.com/gitea/helm-actions/pulls/160
+    # - chart: actions
+    #   repoURL: https://dl.gitea.com/charts/
+    #   targetRevision: ${GITEA_RUNNERS_HELM_VERSION}
+    #   helm:
+    #     releaseName: gitea-runners
+    #     valueFiles:
+    #       - $values/_rendered/gitea-runners/giteaRunnersHelmValues.yaml
+
     - repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
       ref: values
-      path: rendered/${OVERLAY_NAME}/gitea-runners
+      path: _rendered/gitea-runners
       directory:
         recurse: false
-        include: "{giteaRunnerServiceAccount.yaml,giteaRunnerConfigMaps.yaml,giteaRunnersDeployment.yaml}"
+        include: "{giteaRunnerServiceAccount.yaml,giteaRunnerConfigMaps.yaml}"

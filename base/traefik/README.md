@@ -22,6 +22,26 @@ Every service exposed via an `IngressRoute` or `Ingress` object depends on Traef
 - **gitea** — Gitea web UI is exposed via Traefik
 - **longhorn** — Longhorn dashboard is exposed via Traefik
 
+## BGP mode — safe default vs optional optimization
+
+For BGP-based clusters, the base Traefik configuration uses `externalTrafficPolicy: Cluster`.
+This is the safer default when you do **not** want to guarantee one Traefik pod per BGP-speaking node.
+
+With `Cluster` policy:
+
+- Cilium advertises the LoadBalancer VIP through the BGP control plane from the eligible ingress nodes.
+- The upstream router forwards a flow to one of those advertising nodes.
+- The receiving node can send the traffic to **any** ready Traefik pod in the cluster, including a pod on another node.
+- You do not need `nodeAffinity`, `podAntiAffinity`, or a one-pod-per-control-plane design.
+
+Trade-offs of `Cluster` policy:
+
+- Ingress traffic may take an extra in-cluster hop when the selected backend pod is on a different node.
+- Source IP preservation semantics are weaker than with `Local`; if an application requires the original client IP at the pod, validate that explicitly.
+- Router ECMP no longer maps 1:1 to Traefik pods; the node chosen by BGP and the pod chosen by Cilium are separate decisions.
+
+If you explicitly want router-level ECMP to land only on nodes that already host Traefik pods, the repository ships an **optional** BGP override in [templates/yourCluster-bgp/traefik/traefikHelmValuesOverride-bgp.yaml](/workspaces/talos-bootstrapper-data/talos-bootstraper/templates/yourCluster-bgp/traefik/traefikHelmValuesOverride-bgp.yaml). That override switches to `externalTrafficPolicy: Local` and adds pod-placement constraints. Use it only if you are willing to couple ingress availability to pod placement.
+
 ## User Guide
 
 ### Exposing a new service

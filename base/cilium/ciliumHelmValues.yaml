@@ -53,6 +53,11 @@ encryption:
   wireguard:
     persistentKeepalive: 5s
 
+# Explicitly set MTU to account for WireGuard and xVLAN encapsulation overhead. 
+# This is needed to prevent fragmentation and the associated performance degradation.
+# 1500 - 80 (WireGuard) - 50 (VXLAN) = 1370
+MTU: 1370
+
 l2announcements:
   enabled: ${CILIUM_L2_ANNOUNCEMENTS_ENABLED}
 
@@ -67,6 +72,8 @@ ingressController:
 
 #Needed or else ArgoCD will show resources as OutOfSync permanently
 hubble:
+  peerService:
+    servicePort: 443
   ui:
     enabled: true
     tolerations:

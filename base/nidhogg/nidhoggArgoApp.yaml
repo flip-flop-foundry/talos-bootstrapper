@@ -40,7 +40,7 @@ spec:
       helm:
         releaseName: nidhogg
         valueFiles:
-          - $values/rendered/${OVERLAY_NAME}/nidhogg/nidhoggHelmValues.yaml
+          - $values/_rendered/nidhogg/nidhoggHelmValues.yaml
     - repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
       ref: values

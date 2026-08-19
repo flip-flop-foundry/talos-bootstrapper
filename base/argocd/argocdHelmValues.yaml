@@ -129,4 +129,18 @@ repoServer:
       mountPath: /etc/ssl/certs/cluster-ca.crt
       subPath: cluster-ca.crt
       readOnly: true
+
+applicationSet:
+  extraVolumes:
+    - name: cluster-ca
+      configMap:
+        name: cluster-ca-bundle
+        items:
+          - key: ca.crt
+            path: cluster-ca.crt
+  extraVolumeMounts:
+    - name: cluster-ca
+      mountPath: /etc/ssl/certs/cluster-ca.crt
+      subPath: cluster-ca.crt
+      readOnly: true
     

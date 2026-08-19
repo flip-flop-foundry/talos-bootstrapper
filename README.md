@@ -1,68 +1,122 @@
 # Talos Kubernetes Bootstrapper
 
-GitOps-based Talos Kubernetes cluster bootstrapper. Automates provisioning of production-grade K8s clusters from bare metal to fully operational, using a three-tier templating system and ArgoCD for ongoing management.
+GitOps-based Talos Kubernetes cluster bootstrapper. Provides the **base templates + docs** for provisioning production-grade K8s clusters from bare metal to fully operational, using a three-tier templating system and ArgoCD for ongoing management.
 
-## Usage Modes
+> **This repository holds only the base component templates.** The bootstrap tooling (scripts, VS Code tasks, devcontainer) lives in a separate workspace repo:
+> **[flip-flop-foundry/talos-bootstrapper-devenv](https://github.com/flip-flop-foundry/talos-bootstrapper-devenv)**.
+>
+> Environment definitions (your private `<env>.env` file, per-node patches, rendered manifests) live in per-environment git repos that you import into the devenv workspace.
 
-### Mode A — Submodule (recommended)
-
-Keeps sensitive cluster configuration in a **private cluster repo** and uses this repo as a git submodule. Scripts and base templates remain public; overlays (with passwords, CIDRs, domain names) stay private.
+## How the Three Repos Fit Together
 
 ```
-my-cluster-repo/            # Private git repo
-├── talos-bootstraper/      # This repo as a git submodule
-│   ├── adminTasks/
-│   └── base/
-├── overlays/               # Your private cluster configs
-│   └── mycluster/
-│       └── mycluster.env
-└── rendered/               # Gitignored output
+┌──────────────────────────────────────────────────────────────────┐
+│  talos-bootstrapper-devenv (public)                              │
+│  The workspace. Devcontainer + VS Code tasks that call:          │
+│    .vscode/tasks/render-overlay.sh                               │
+│    .vscode/tasks/cluster-initialSetup.sh                         │
+│    .vscode/tasks/cluster-bootstrap.sh                            │
+│    .vscode/tasks/bootstrap-customer.sh                           │
+│    ... etc.                                                      │
+└──────────────────────────────────────────────────────────────────┘
+                              │
+                              ├─── consumes ──► ┌───────────────────────────────┐
+                              │                 │  talos-bootstraper (this repo)│
+                              │                 │  base/  — component templates │
+                              │                 │  docs   — this README, etc.   │
+                              │                 └───────────────────────────────┘
+                              │
+                              └─── imports ───► ┌───────────────────────────────┐
+                                                │  <env>-cluster-repo (private) │
+                                                │  <env>.env                    │
+                                                │  talos/nodes/*.yaml           │
+                                                │  _rendered/  (output)         │
+                                                │  <component>/  (overlays)     │
+                                                └───────────────────────────────┘
 ```
 
-**Quick start:**
+At runtime the devenv container mounts a shared data volume at `$TALOS_BOOTSTRAPPER_DATA_DIR` (default `/workspaces/talos-bootstrapper-data`) that contains:
 
-Fork https://github.com/flip-flop-foundry/talos-bootstraper-cluster-repo-example
-
-Follow the README.md in that repo to get started
-
-### Mode B — Single repo (original)
-
-Clone this repo directly and create overlays inside it. Simpler setup, but your cluster configuration lives in the same repo as the scripts.
-
-```bash
-# 1. Copy an example overlay
-cp -r overlays/yourCluster-l2 overlays/mycluster
-mv overlays/mycluster/yourCluster-l2.env overlays/mycluster/mycluster.env
-
-# 2. Edit the env file, then run the scripts
-./adminTasks/cluster-initialSetup.sh overlays/mycluster/mycluster.env
-./adminTasks/render-overlay.sh overlays/mycluster/mycluster.env
-./adminTasks/cluster-bootstrap.sh overlays/mycluster/mycluster.env
 ```
+$TALOS_BOOTSTRAPPER_DATA_DIR/
+├── talos-bootstraper/       # This repo, cloned once
+└── environments/            # One directory per imported environment
+    └── <env>/
+        ├── <env>.env        # All cluster config for that env
+        ├── talos/           # Machine configs + secrets (secrets gitignored)
+        ├── <component>/     # Per-env overlay files
+        └── _rendered/       # Output of render-overlay.sh — pushed to Gitea
+```
+
+## Quick Start
+
+1. Open the [talos-bootstrapper-devenv](https://github.com/flip-flop-foundry/talos-bootstrapper-devenv) repo in a devcontainer (VS Code will offer to reopen automatically).
+2. Run the **Import environment** VS Code task and provide the git URL of your private env repo. See the [talos-bootstraper-cluster-repo-example](https://github.com/flip-flop-foundry/talos-bootstraper-cluster-repo-example) for a working env-repo template.
+3. From the picker in every subsequent task, select your imported environment.
+4. Typical order for a new cluster: **Set Active Talos/Kube Context** → **Apply Talos configs** → (automatic hand-off into cluster bootstrap and Gitea setup).
 
 ## Architecture
 
 ```
-base/                    # Component templates with ${VAR} placeholders
-overlays/                # Mode A: example overlays in this repo; Mode B: real cluster overlays live here
+base/                    # Component templates with ${VAR} placeholders (this repo)
+overlays/                # Example overlays only — see the cluster-repo-example for real usage
   <cluster>/
-    <cluster>.env        # All cluster configuration for that cluster overlay
-    talos/               # Generated Talos machine configs + optional cluster/node patch files
-rendered/                # OUTPUT (gitignored) — final manifests after rendering
-adminTasks/              # Bootstrap and rendering scripts
-  lib/                   # Shared shell libraries
-  pxe/                   # iPXE network boot infrastructure (Docker-based)
+    <cluster>.env
+    talos/
+
+# In each imported environment (under $TALOS_BOOTSTRAPPER_DATA_DIR/environments/<env>/):
+<env>.env                # All cluster configuration
+talos/                   # Generated Talos machine configs + optional cluster/node patch files
+<component>/             # Per-env overlay YAMLs
+_rendered/               # OUTPUT — final manifests after rendering (pushed to Gitea)
 ```
 
 ### Rendering Pipeline
 
 ```
 base/<component>/*.yaml  ──┐
-                            ├──> yq merge (overlay wins) ──> envsubst ──> rendered/<cluster>/
-overlays/<cluster>/<component>/*.yaml ─┘
+                            ├──> yq merge (overlay wins) ──> envsubst ──> $env/_rendered/<component>/
+$env/<component>/*.yaml ─┘
 ```
 
-The `EXCLUDED_BASE` array in each `.env` file controls which base components or files are skipped during rendering.
+The `EXCLUDED_BASE` array in each `.env` file controls which components or files are skipped during rendering. Matching is done on the rendered output path, so it applies to base files, overlay files, and merged files.
+
+### Talos Per-Node Patch Rendering
+
+Per-node Talos patches live in `talos/nodes/<hostname>.yaml` inside each environment repo. The hostname is the short hostname (first DNS label), for example `k8s-test-1` for `k8s-test-1.domain.dk`.
+
+The generation logic in `devenv/.vscode/tasks/lib/talos.sh` applies per-node patches as follows:
+
+1. The first YAML document from the generated node machine config is treated as the primary machine config document.
+2. The first YAML document from `talos/nodes/<hostname>.yaml` is deep-merged into that primary document (patch wins on conflicts).
+3. Existing non-primary documents from the generated node config are preserved.
+4. Additional documents from `talos/nodes/<hostname>.yaml` are appended verbatim to the final node config.
+
+This means a per-node patch can safely contain both:
+
+- Document 1: regular `machine:` overrides (labels, sysctls, install settings, etc.)
+- Document 2..N: standalone Talos config documents such as `LinkConfig`, `HostnameConfig`, or other supported docs.
+
+Example:
+
+```yaml
+machine:
+   nodeLabels:
+      egressenabled: "true"
+---
+apiVersion: v1alpha1
+kind: LinkConfig
+name: eth0
+up: true
+addresses:
+   - address: 192.168.130.181/24
+```
+
+Notes:
+
+- Use the real interface name from Talos (`talosctl get links`) when writing `LinkConfig.name`.
+- Include prefix length in every `addresses[].address` entry (for example `/24` or `/64`).
+- If a patch contains only a standalone document (for example only `LinkConfig` and no `machine:` document), the merge step still expects document 1 to be merge-compatible. Keep a `machine:` document first for predictable behavior.
 
 ## LoadBalancer Mode: L2 vs BGP
 
@@ -140,8 +194,9 @@ See [overlays/yourCluster-bgp/](overlays/yourCluster-bgp/) for a complete exampl
 ## Bootstrap Workflow
 
 ```
-1. cluster-initialSetup.sh  → Install prerequisites, generate Talos machine configs
-2. [Manual]                  → Install Talos OS on nodes
+1. [Manual]                  → Boot nodes from Talos ISO/image into maintenance mode
+                               (skip for PXE — cluster-initialSetup.sh handles this automatically)
+2. cluster-initialSetup.sh  → Generate Talos machine configs and apply them to nodes in maintenance mode
 3. cluster-bootstrap.sh      → Full bootstrap:
    ├─ Setup kubeconfig + helm repos
    ├─ Install Cilium (networking — must be first)
@@ -154,14 +209,113 @@ See [overlays/yourCluster-bgp/](overlays/yourCluster-bgp/) for a complete exampl
 4. ArgoCD manages everything → auto-sync, self-heal, prune
 ```
 
+## Node Provisioning — Installing Talos OS
+
+Before running `cluster-initialSetup.sh`, nodes must be booted into Talos maintenance mode. The script generates machine configs and immediately applies them to the waiting nodes — so they need to be reachable first. How you get them there depends on your hardware.
+
+> **Exception — PXE boot:** When `TALOS_PXE_ENABLED=true`, `cluster-initialSetup.sh` starts the PXE server automatically and waits for nodes to boot. No manual step required.
+
+### Choosing the Right Installer Type
+
+`TALOS_INSTALLER_TYPE` in your `.env` file controls which image the cluster uses for the [Talos Image Factory](https://factory.talos.dev). It also controls how Talos identifies the machine's platform at boot time.
+
+| Installer Type | Platform | When to Use |
+|----------------|----------|-------------|
+| `installer` | `metal` | Bare metal, no Secure Boot |
+| `installer-secureboot` | `metal` | Bare metal with UEFI Secure Boot |
+| `metal-installer-secureboot` | `metal` | Bare metal with Secure Boot (preferred for modern hardware) |
+| `nocloud-installer-secureboot` | `nocloud` | VMs on Proxmox, cloud, or any hypervisor — Secure Boot |
+
+> **Raspberry Pi 4** does not use `TALOS_INSTALLER_TYPE` for the initial flash. It uses a dedicated `rpi_generic` overlay image (raw `.raw.xz`). See below.
+
+### Bare Metal (USB ISO)
+
+1. Get the ISO URL — run `pxe-setup.sh` (it prints the URL), or build it manually once you have the schematic ID (printed by `cluster-initialSetup.sh` or `pxe-setup.sh`):
+   ```
+   https://factory.talos.dev/image/<SCHEMATIC_ID>/<TALOS_INSTALL_VERSION>/metal-amd64.iso
+   https://factory.talos.dev/image/<SCHEMATIC_ID>/<TALOS_INSTALL_VERSION>/metal-amd64-secureboot.iso
+   ```
+2. Flash the ISO to a USB stick (e.g. with [Balena Etcher](https://etcher.balena.io/) or `dd`).
+3. Boot the node from USB — Talos enters maintenance mode.
+4. With all nodes in maintenance mode, run `cluster-initialSetup.sh` — it generates and applies the machine configs.
+
+Use `TALOS_INSTALLER_TYPE="metal-installer-secureboot"` for modern bare-metal hardware with Secure Boot, or `installer-secureboot` / `installer` for older setups.
+
+### Proxmox VMs
+
+Talos runs as a VM on Proxmox using the `nocloud` platform. The `nocloud` installer type tells Talos it is running in a generic VM environment (not a named cloud provider). Machine config is applied via `talosctl apply-config` over the network once the VM is in maintenance mode — no cloud-init drive is needed.
+
+**Installer type:**
+```bash
+export TALOS_INSTALLER_TYPE="nocloud-installer-secureboot"
+```
+
+**VM setup in Proxmox:**
+1. Download the Talos ISO from the Image Factory:
+   ```
+   https://factory.talos.dev/image/<SCHEMATIC_ID>/<TALOS_INSTALL_VERSION>/metal-amd64.iso
+   ```
+2. Upload the ISO to your Proxmox ISO storage (Datacenter → Storage → ISO Images).
+3. Create a VM:
+   - **Machine type:** `q35`
+   - **BIOS:** `OVMF (UEFI)` with EFI disk enabled (required for Secure Boot; use `SeaBIOS` + `installer` type if you want non-Secure Boot)
+   - **Boot disk:** `VirtIO SCSI` or `SATA`, ≥ `TALOS_MIN_INSTALL_DISK_SIZE_GB`
+   - **Network:** `VirtIO` — ensure the VM NIC is on the same network as your other cluster nodes
+   - **CD-ROM:** attach the Talos ISO
+4. Start the VM — it boots from the ISO into Talos maintenance mode.
+5. With all VMs in maintenance mode, run `cluster-initialSetup.sh` — it generates and applies the machine configs.
+6. After Talos installs to disk and reboots, detach/remove the ISO.
+
+> **Tip:** Set `LONGHORN_IGNORE_USB_DISKS=true` and `TALOS_MIN_INSTALL_DISK_SIZE_GB=64` in your overlay — VMs don't have USB storage, and the install disk should be a proper virtual disk.
+
+### Raspberry Pi 4
+
+Raspberry Pi 4 uses a dedicated image with U-Boot and the `rpi_generic` SBC overlay — no separate UEFI firmware is needed.
+
+**Installer type:** Not applicable for initial flash. The RPi image is built automatically alongside your cluster schematic when running `pxe-setup.sh`.
+
+1. Run `pxe-setup.sh` — it prints an SD card image URL:
+   ```
+   https://factory.talos.dev/image/<RPI_SCHEMATIC_ID>/<TALOS_INSTALL_VERSION>/metal-arm64.raw.xz
+   ```
+   The RPi schematic includes the same extensions as your cluster, plus the `siderolabs/sbc-raspberrypi` overlay.
+2. Flash to a microSD card (or USB boot drive):
+   ```bash
+   # macOS
+   xz -d -c metal-arm64.raw.xz | sudo dd conv=fsync bs=16m of=/dev/rdiskN
+
+   # Linux
+   xz -d -c metal-arm64.raw.xz | sudo dd conv=fsync bs=4M of=/dev/sdX
+   ```
+3. Insert the card and power on the Pi — Talos enters maintenance mode.
+4. With all nodes in maintenance mode, run `cluster-initialSetup.sh` — it generates and applies the machine configs.
+
+**Raspberry Pi node tuning** — RPi 4 nodes are often memory-constrained. Disable hugepages in the per-node patch:
+```yaml
+# overlays/<cluster>/talos/nodes/<hostname>.yaml
+machine:
+  sysctls:
+    vm.nr_hugepages: "0"
+```
+
+> **Mixed clusters:** You can run Proxmox VMs and Raspberry Pis in the same cluster. Each node gets its own machine config regardless of hardware type. The `TALOS_INSTALLER_TYPE` in your `.env` applies to the **install image** embedded in the machine config; ensure it matches the majority of your nodes or use per-node patches for outliers.
+
+### PXE Boot
+
+For bare-metal nodes that can network boot, see the [iPXE Network Boot](#ipxe-network-boot) section below. PXE eliminates the need to flash USB sticks and works well in rack environments. Not applicable to Proxmox VMs or Raspberry Pis.
+
+---
+
 ## iPXE Network Boot
 
 Instead of manually flashing USB sticks with Talos, nodes can PXE boot directly into Talos maintenance mode over the network. The PXE setup uses the [Talos Image Factory](https://factory.talos.dev) API to build custom schematics with your configured extensions and kernel args, then serves boot assets via Docker containers.
 
 ### Setup
 
+Run the **Setup PXE Server** VS Code task (or invoke directly):
+
 ```bash
-./adminTasks/pxe-setup.sh overlays/<cluster>/<cluster>.env
+$devenv/.vscode/tasks/pxe-setup.sh <env-name>
 ```
 
 This single command:
@@ -199,8 +353,10 @@ export TALOS_SCHEMATIC_EXTRA_KERNEL_ARGS=("net.ifnames=0")       # Extra kernel 
 
 ### Infrastructure
 
+The PXE folder lives at the root of the devenv workspace (`devenv/pxe/`):
+
 ```
-adminTasks/pxe/
+devenv/pxe/
   docker-compose.yml         # nginx (HTTP) + dnsmasq (TFTP, two profiles)
   nginx.conf                 # Static file server for boot assets
   ipxe-boot.ipxe.template    # iPXE boot script template

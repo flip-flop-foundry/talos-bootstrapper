@@ -13,20 +13,11 @@ spec:
   method: volumeSnapshot
   backupOwnerReference: cluster
   cluster:
-    name: gitea-sql-cluster
+    name: gitea-sql
 ---
 ##############################
 #      Server Cert          
 ##############################
-apiVersion: v1
-kind: Secret
-type: kubernetes.io/tls
-metadata:
-  name: gitea-sql-server-cert
-  labels:
-    cnpg.io/reload: ""
-    initialDeployment: "true"
----
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -152,7 +143,7 @@ spec: # https://cloudnative-pg.io/documentation/current/cloudnative-pg.v1/#postg
   imageName: ghcr.io/cloudnative-pg/postgresql:${GITEA_PSQL_VERSION}
   storage:
     size: ${GITEA_PSQL_SIZE}
-    storageClass: pvckey-2replica-retained-backedup-ssd-cp
+    storageClass: nssharedkey-2replica-retained-backedup-ssd-cp
   backup:
     volumeSnapshot:
       className: longhorn-snapshot

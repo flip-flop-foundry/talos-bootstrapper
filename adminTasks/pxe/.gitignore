@@ -1,7 +1,0 @@
-# PXE boot assets are downloaded at runtime — do not commit
-assets/
-# dnsmasq config is generated at runtime from template
-dnsmasq.conf
-# iPXE firmware is built at runtime (manual DHCP mode) — do not commit
-tftp/
-embed.ipxe
