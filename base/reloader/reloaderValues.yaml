@@ -24,3 +24,8 @@ reloader:
   reloadOnDelete: true
 
   logLevel: debug # Log level to use (trace, debug, info, warning, error, fatal and panic)
+  deployment:
+    tolerations:
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"

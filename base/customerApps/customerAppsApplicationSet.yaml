@@ -21,8 +21,8 @@
 #      and creates Applications for every matching repo in that customer's org.
 #
 # Required environment variables (set in <cluster>.env):
-#   GITEA_DOMAIN_NAME                  e.g. gitea.tuborgnetes.dk
-#   GITEA_CLUSTER_SERVICES_REPO_URL    e.g. https://gitea.tuborgnetes.dk/k8s-cluster/cluster-services.git
+#   GITEA_DOMAIN_NAME                  e.g. gitea.domain.dk
+#   GITEA_CLUSTER_SERVICES_REPO_URL    e.g. https://gitea.domain.dk/k8s-cluster/cluster-services.git
 #   ARGOCD_NAMESPACE                   e.g. argocd
 #
 apiVersion: argoproj.io/v1alpha1

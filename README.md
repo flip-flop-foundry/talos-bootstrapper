@@ -81,6 +81,43 @@ $env/<component>/*.yaml ─┘
 
 The `EXCLUDED_BASE` array in each `.env` file controls which components or files are skipped during rendering. Matching is done on the rendered output path, so it applies to base files, overlay files, and merged files.
 
+### Talos Per-Node Patch Rendering
+
+Per-node Talos patches live in `talos/nodes/<hostname>.yaml` inside each environment repo. The hostname is the short hostname (first DNS label), for example `k8s-test-1` for `k8s-test-1.domain.dk`.
+
+The generation logic in `devenv/.vscode/tasks/lib/talos.sh` applies per-node patches as follows:
+
+1. The first YAML document from the generated node machine config is treated as the primary machine config document.
+2. The first YAML document from `talos/nodes/<hostname>.yaml` is deep-merged into that primary document (patch wins on conflicts).
+3. Existing non-primary documents from the generated node config are preserved.
+4. Additional documents from `talos/nodes/<hostname>.yaml` are appended verbatim to the final node config.
+
+This means a per-node patch can safely contain both:
+
+- Document 1: regular `machine:` overrides (labels, sysctls, install settings, etc.)
+- Document 2..N: standalone Talos config documents such as `LinkConfig`, `HostnameConfig`, or other supported docs.
+
+Example:
+
+```yaml
+machine:
+   nodeLabels:
+      egressenabled: "true"
+---
+apiVersion: v1alpha1
+kind: LinkConfig
+name: eth0
+up: true
+addresses:
+   - address: 192.168.130.181/24
+```
+
+Notes:
+
+- Use the real interface name from Talos (`talosctl get links`) when writing `LinkConfig.name`.
+- Include prefix length in every `addresses[].address` entry (for example `/24` or `/64`).
+- If a patch contains only a standalone document (for example only `LinkConfig` and no `machine:` document), the merge step still expects document 1 to be merge-compatible. Keep a `machine:` document first for predictable behavior.
+
 ## LoadBalancer Mode: L2 vs BGP
 
 Cilium provides LoadBalancer IP advertisement. Two modes are supported, toggled entirely through the `EXCLUDED_BASE` array in the overlay `.env` file.

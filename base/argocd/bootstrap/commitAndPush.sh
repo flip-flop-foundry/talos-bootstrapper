@@ -30,18 +30,28 @@ cd "$GIT_SOURCE_DIR" || {
   exit 3
 }
 
+# cluster-bootstrap.sh copies plain overlay content into $GIT_SOURCE_DIR, so
+# this directory is typically not a git repo yet.
+if [ ! -d .git ]; then
+  echo "Initializing git repository in $GIT_SOURCE_DIR..."
+  git init
+fi
+
 echo "Staging all changes..."
 git add -A -f -- .
 
-
-# Ensure branch does not already exist
-if git show-ref --verify --quiet refs/heads/"$GIT_BRANCH_NAME"; then
-  echo "Branch '$GIT_BRANCH_NAME' already exists locally. Aborting to avoid overwriting." 
-  exit 5
+if git diff --cached --quiet; then
+  echo "No changes detected after staging. Nothing to commit."
+  exit 0
 fi
 
-echo "Creating and switching to branch '$GIT_BRANCH_NAME'..."
-git checkout -b "$GIT_BRANCH_NAME"
+if git show-ref --verify --quiet refs/heads/"$GIT_BRANCH_NAME"; then
+  echo "Switching to existing local branch '$GIT_BRANCH_NAME'..."
+  git checkout "$GIT_BRANCH_NAME"
+else
+  echo "Creating and switching to branch '$GIT_BRANCH_NAME'..."
+  git checkout -b "$GIT_BRANCH_NAME"
+fi
 
 # Commit with configured committer (local to this invocation)
 echo "Committing with author: $GIT_AUTHOR_NAME <$GIT_AUTHOR_EMAIL>"

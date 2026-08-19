@@ -27,7 +27,6 @@ spec:
     - repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
       targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
       path: _rendered/gitea
-      ref: values
       directory:
         recurse: false
         include: "{giteaCnpgCluster.yaml}"

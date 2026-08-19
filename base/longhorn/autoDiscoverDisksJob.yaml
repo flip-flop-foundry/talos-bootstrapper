@@ -154,8 +154,27 @@ spec:
 
           
           # Configuration
-          EXPECTED_NODES=$TALOS_NR_OF_NODES
-          CALCULATED_TIMEOUT=$((150 * TALOS_NR_OF_NODES))
+          TALOS_EXPECTED_NODES=$TALOS_NR_OF_NODES
+          EXPECTED_NODES=$TALOS_EXPECTED_NODES
+
+          # Only wait for nodes that currently exist in Kubernetes. During
+          # bootstrap we often bring up control-plane nodes first, while
+          # TALOS_NR_OF_NODES still includes workers that are not joined yet.
+          K8S_NODES=$(kubectl get nodes -o json 2>/dev/null | jq -r '.items[].metadata.name' || echo "")
+          K8S_NODE_COUNT=0
+          [ -n "$K8S_NODES" ] && K8S_NODE_COUNT=$(echo "$K8S_NODES" | wc -l | tr -d ' ')
+
+          if [ "$K8S_NODE_COUNT" -gt 0 ] && [ "$K8S_NODE_COUNT" -lt "$EXPECTED_NODES" ]; then
+            echo "WARNING: TALOS_NR_OF_NODES=$TALOS_EXPECTED_NODES but only $K8S_NODE_COUNT node(s) currently registered in Kubernetes"
+            echo "WARNING: limiting expected node count to currently registered Kubernetes nodes to avoid bootstrap hang"
+            EXPECTED_NODES=$K8S_NODE_COUNT
+          fi
+
+          if [ "$K8S_NODE_COUNT" -eq 0 ]; then
+            echo "WARNING: kubectl get nodes returned no nodes; falling back to TALOS_NR_OF_NODES=$EXPECTED_NODES"
+          fi
+
+          CALCULATED_TIMEOUT=$((150 * EXPECTED_NODES))
           if [ $CALCULATED_TIMEOUT -gt 400 ]; then
             TIMEOUT_SECONDS=$CALCULATED_TIMEOUT
           else
@@ -435,6 +454,13 @@ spec:
           echo "========================================="
           echo "FINAL SUMMARY"
           echo "========================================="
+          if [ "$EXPECTED_NODES" -lt "$TALOS_EXPECTED_NODES" ]; then
+            echo "WARNING: expected node count was reduced for this run"
+            echo "WARNING: TALOS_NR_OF_NODES=$TALOS_EXPECTED_NODES, Kubernetes registered nodes=$K8S_NODE_COUNT, effective expected nodes=$EXPECTED_NODES"
+            echo "WARNING: this is normal during staged bootstrap (for example control-plane first, workers later)"
+            echo ""
+          fi
+
           echo "Successfully configured nodes:"
           if [ -n "$PROCESSED_NODES" ]; then
             for node in $PROCESSED_NODES; do

@@ -5,3 +5,10 @@ metadata:
 spec:
   loadBalancerIPs: true
   externalIPs: true
+  # nodeSelector: Required for Cilium 1.19.2+ L2 forwarding to work correctly.
+  # Restricts L2 announcements to control-plane nodes to avoid lease/forwarding race conditions.
+  # Without this, L2 VIP traffic is advertised but not forwarded to backend pods.
+  nodeSelector:
+    matchExpressions:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists

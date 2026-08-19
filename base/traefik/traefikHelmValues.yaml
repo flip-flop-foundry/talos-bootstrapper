@@ -1,6 +1,11 @@
 deployment:
   replicas: ${TRAEFIK_REPLICAS}
 
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+
 ingressClass:  # @schema additionalProperties: false
   enabled: true
   isDefaultClass: false

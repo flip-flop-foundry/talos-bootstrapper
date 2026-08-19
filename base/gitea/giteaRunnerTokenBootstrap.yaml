@@ -4,20 +4,20 @@ kind: ServiceAccount
 metadata:
   name: gitea-runner-token-creator
   namespace: ${GITEA_NAMESPACE}
-  # annotations:
-  #   argocd.argoproj.io/hook: PreSync
-  #   argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-  #   argocd.argoproj.io/sync-wave: "-2"
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-2"
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: gitea-runner-token-creator
   namespace: ${GITEA_NAMESPACE}
-  # annotations:
-  #   argocd.argoproj.io/hook: PreSync
-  #   argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-  #   argocd.argoproj.io/sync-wave: "-2"
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-2"
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
@@ -28,10 +28,10 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: gitea-runner-token-creator
-  # annotations:
-  #   argocd.argoproj.io/hook: PreSync
-  #   argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-  #   argocd.argoproj.io/sync-wave: "-2"
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-2"
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
@@ -42,10 +42,10 @@ kind: RoleBinding
 metadata:
   name: gitea-runner-token-creator
   namespace: ${GITEA_NAMESPACE}
-  # annotations:
-  #   argocd.argoproj.io/hook: PreSync
-  #   argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-  #   argocd.argoproj.io/sync-wave: "-2"
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-2"
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -59,10 +59,10 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: gitea-runner-token-creator
-  # annotations:
-  #   argocd.argoproj.io/hook: PreSync
-  #   argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-  #   argocd.argoproj.io/sync-wave: "-2"
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-2"
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -78,7 +78,6 @@ metadata:
   name: gitea-runner-token-creator
   namespace: ${GITEA_NAMESPACE}
   annotations:
-    argocd.argoproj.io/hook: PreSync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 spec:
   

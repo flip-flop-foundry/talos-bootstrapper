@@ -18,15 +18,6 @@ spec:
 ##############################
 #      Server Cert          
 ##############################
-apiVersion: v1
-kind: Secret
-type: kubernetes.io/tls
-metadata:
-  name: gitea-sql-server-cert
-  labels:
-    cnpg.io/reload: ""
-    initialDeployment: "true"
----
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
