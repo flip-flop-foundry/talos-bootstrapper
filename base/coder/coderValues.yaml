@@ -67,10 +67,6 @@ coder:
     wildcardHost: "*.${CODER_DOMAIN_NAME}"
     annotations:
       cert-manager.io/cluster-issuer: ${TALOS_CLUSTER_NAME}-ca-issuer
-      # No cert-manager.io/common-name or alt-names: this ingress has both an apex
-      # and a wildcard TLS entry, and any name forced onto both generated certs
-      # makes the wildcard cert match the apex SNI in Traefik (indexed by CN+SANs),
-      # so it gets served intermittently and *.host fails to match host.
       external-dns.alpha.kubernetes.io/hostname: "${CODER_DOMAIN_NAME},*.${CODER_DOMAIN_NAME}"
       advertise-via-dns: "true"
     tls:

@@ -26,6 +26,7 @@ on:
   push:
     paths:
       - "_rendered/coder/templates/**"
+      - ".gitea/workflows/coder-templates.yaml"
 
 jobs:
   push-templates:
