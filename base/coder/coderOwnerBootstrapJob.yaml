@@ -1,0 +1,194 @@
+###############################################################################
+# First-owner bootstrap for the Coder control plane
+#
+# PostSync Job that seeds the initial Coder owner automatically so no manual
+# `coder server create-admin-user` step is needed. It runs AFTER the Coder
+# Deployment is healthy, then:
+#   1. waits for the in-cluster Coder API to answer,
+#   2. skips if the first user already exists (GET /api/v2/users/first -> 200),
+#   3. otherwise creates the owner via the unauthenticated bootstrap endpoint
+#      POST /api/v2/users/first with a securely generated random password,
+#   4. persists email/username/password into the `coder-owner-bootstrap` secret.
+#
+# The CODER_SESSION_TOKEN for Gitea CI is minted separately by gitea-bootstrap.sh
+# (which execs the Coder pod and holds the Gitea admin token), so no Gitea
+# credential is ever staged into the coder namespace.
+#
+# Idempotent: reruns on every sync. Owner creation only acts when no owner exists.
+# If a password is already stored in the secret it is reused, so the stored value
+# stays valid even if the user is recreated.
+###############################################################################
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: coder-owner-bootstrap
+  namespace: ${CODER_NAMESPACE}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "1"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: coder-owner-bootstrap
+  namespace: ${CODER_NAMESPACE}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "1"
+rules:
+  # Least-privilege: only ever read/patch the one secret this Job manages.
+  # (create cannot be constrained by resourceNames, so it is a separate rule.)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["coder-owner-bootstrap"]
+    verbs: ["get", "patch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: coder-owner-bootstrap
+  namespace: ${CODER_NAMESPACE}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "1"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: coder-owner-bootstrap
+subjects:
+  - kind: ServiceAccount
+    name: coder-owner-bootstrap
+    namespace: ${CODER_NAMESPACE}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: coder-owner-bootstrap
+  namespace: ${CODER_NAMESPACE}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      name: coder-owner-bootstrap
+    spec:
+      serviceAccountName: coder-owner-bootstrap
+      automountServiceAccountToken: true
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: owner-bootstrap
+          image: alpine/k8s:${KUBERNETES_VERSION}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop:
+                - ALL
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+
+              NS="${CODER_NAMESPACE}"
+              SECRET="coder-owner-bootstrap"
+              SVC="http://coder.${CODER_NAMESPACE}.svc"
+              EMAIL="admin@${CODER_DOMAIN_NAME}"
+              USERNAME="admin"
+
+              # 1. Wait for the Coder API to answer (buildinfo is unauthenticated).
+              echo "Waiting for Coder API at ${SVC} ..."
+              i=0
+              until curl -fsS -o /dev/null "${SVC}/api/v2/buildinfo"; do
+                i=$((i + 1))
+                if [ "${i}" -ge 60 ]; then
+                  echo "ERROR: Coder API not reachable after ~5m." >&2
+                  exit 1
+                fi
+                sleep 5
+              done
+              echo "Coder API is up."
+
+              # 2. Detect whether the first owner already exists.
+              first_code="$(curl -fsS -o /dev/null -w '%{http_code}' "${SVC}/api/v2/users/first" || true)"
+              if [ "${first_code}" = "200" ]; then
+                echo "First owner already exists (GET /users/first -> 200)."
+                OWNER_EXISTS=yes
+              else
+                echo "No owner yet (GET /users/first -> ${first_code}). Creating one."
+                OWNER_EXISTS=no
+              fi
+
+              if [ "${OWNER_EXISTS}" = "no" ]; then
+                # 3. Reuse a stored password if present, else generate a secure one.
+                PASSWORD="$(kubectl get secret "${SECRET}" -n "${NS}" \
+                  -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+                if [ -n "${PASSWORD}" ]; then
+                  echo "Reusing password already stored in ${NS}/${SECRET}."
+                else
+                  # Over-read entropy so the length survives stripping +/= (matches CNPG sibling).
+                  PASSWORD="$(head -c 48 /dev/urandom | base64 | tr -d '/+=' | head -c 32)"
+                  echo "Generated a new random owner password."
+                fi
+
+                # 4. Create the first owner via the bootstrap endpoint.
+                body="$(printf '{"email":"%s","username":"%s","password":"%s","trial":false}' \
+                  "${EMAIL}" "${USERNAME}" "${PASSWORD}")"
+                resp="$(curl -sS -X POST -H 'Content-Type: application/json' \
+                  -d "${body}" -w '\n%{http_code}' "${SVC}/api/v2/users/first" 2>&1 || true)"
+                code="$(printf '%s\n' "${resp}" | tail -n1)"
+                payload="$(printf '%s\n' "${resp}" | sed '$d')"
+                if [ "${code}" = "201" ]; then
+                  echo "Created Coder owner ${USERNAME} <${EMAIL}>."
+                elif printf '%s' "${payload}" | grep -qi 'already'; then
+                  echo "Owner was created concurrently; reusing existing owner."
+                else
+                  echo "ERROR: failed to create first owner (HTTP ${code}):" >&2
+                  printf '%s\n' "${payload}" >&2
+                  exit 1
+                fi
+
+                # 5. Persist the credentials into the secret (patch the shell, or create).
+                e_b64="$(printf '%s' "${EMAIL}" | base64 | tr -d '\n')"
+                u_b64="$(printf '%s' "${USERNAME}" | base64 | tr -d '\n')"
+                p_b64="$(printf '%s' "${PASSWORD}" | base64 | tr -d '\n')"
+                if ! kubectl patch secret "${SECRET}" -n "${NS}" --type merge \
+                  -p "{\"data\":{\"email\":\"${e_b64}\",\"username\":\"${u_b64}\",\"password\":\"${p_b64}\"}}" 2>/dev/null; then
+                  kubectl create secret generic "${SECRET}" -n "${NS}" \
+                    --type=Opaque \
+                    --from-literal=email="${EMAIL}" \
+                    --from-literal=username="${USERNAME}" \
+                    --from-literal=password="${PASSWORD}"
+                fi
+                echo "Stored owner credentials in secret ${NS}/${SECRET} (username=${USERNAME}, email=${EMAIL})."
+              fi
+              echo "Owner bootstrap complete."
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi

@@ -1,0 +1,168 @@
+###############################
+#        Backup Schedule      #
+###############################
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: coder-sql-backup
+  annotations:
+    argocd.argoproj.io/sync-wave: "50" # Deploy late, so that the CSI Snapshot CRDs are available
+spec:
+  schedule: "0 40 22 * * *"  # Daily at 22:40 (offset from Gitea's 00:00 backup)
+  method: volumeSnapshot
+  backupOwnerReference: cluster
+  cluster:
+    name: coder-sql
+---
+##############################
+#        Server Cert         #
+##############################
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: coder-sql-server-cert
+  annotations:
+    # Negative waves keep the whole CNPG stack ahead of the Coder Helm chart
+    # (default wave 0) now that both live in a single Application.
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  secretName: coder-sql-server-cert
+  usages:
+    - server auth
+  dnsNames:
+    - coder-sql-rw
+    - coder-sql-rw.${CODER_NAMESPACE}
+    - coder-sql-rw.${CODER_NAMESPACE}.svc
+    - coder-sql-r
+    - coder-sql-r.${CODER_NAMESPACE}
+    - coder-sql-r.${CODER_NAMESPACE}.svc
+    - coder-sql-ro
+    - coder-sql-ro.${CODER_NAMESPACE}
+    - coder-sql-ro.${CODER_NAMESPACE}.svc
+  issuerRef:
+    name: ${TALOS_CLUSTER_NAME}-ca-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+  secretTemplate:
+    labels:
+      cnpg.io/reload: ""
+---
+###############################
+#   PSQL Client CA            #
+###############################
+# CNPG validates client certs against its own client-CA chain, so a dedicated
+# self-signed CA is required (it cannot reuse the cluster CA for client certs).
+# https://github.com/cloudnative-pg/cloudnative-pg/issues/2841
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: coder-cnpg-selfsigned-issuer
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: coder-cnpg-client-ca
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  isCA: true
+  commonName: coder-cnpg-client-ca
+  secretName: coder-cnpg-client-ca-key-pair
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: coder-cnpg-selfsigned-issuer
+    kind: Issuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: coder-cnpg-client-ca-issuer
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  ca:
+    secretName: coder-cnpg-client-ca-key-pair
+---
+###############################
+#   Coder Client cert         #
+###############################
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: coder-cnpg-client-cert
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  secretName: coder-cnpg-client-cert
+  usages:
+    - client auth
+  commonName: ${CODER_PSQL_USERNAME}
+  issuerRef:
+    name: coder-cnpg-client-ca-issuer
+    kind: Issuer
+    group: cert-manager.io
+  secretTemplate:
+    labels:
+      cnpg.io/reload: ""
+---
+#########################################
+#   CNPG streaming replica cert         #
+#########################################
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: coder-cnpg-streaming-replica-cert
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  secretName: coder-cnpg-streaming-replica-cert
+  usages:
+    - client auth
+  commonName: streaming_replica
+  issuerRef:
+    name: coder-cnpg-client-ca-issuer
+    kind: Issuer
+    group: cert-manager.io
+  secretTemplate:
+    labels:
+      cnpg.io/reload: ""
+---
+# https://cloudnative-pg.io/documentation/current/cloudnative-pg.v1/#postgresql-cnpg-io-v1-Cluster
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: coder-sql
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"  # After the DB certs (wave -2); ArgoCD gates the Coder chart (wave 0) on this Cluster becoming Healthy
+spec:
+  instances: 2
+  imageName: ghcr.io/cloudnative-pg/postgresql:${CODER_PSQL_VERSION}
+  storage:
+    size: ${CODER_PSQL_SIZE}
+    storageClass: nssharedkey-2replica-retained-backedup-ssd-cp
+  backup:
+    volumeSnapshot:
+      className: longhorn-snapshot
+      snapshotOwnerReference: backup
+  certificates:
+    serverTLSSecret: coder-sql-server-cert
+    serverCASecret: coder-sql-server-cert
+    clientCASecret: coder-cnpg-client-ca-key-pair    # CA secret (not the leaf) — used to verify client certs
+    replicationTLSSecret: coder-cnpg-streaming-replica-cert
+  affinity:
+    tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+  postgresql:
+    pg_hba:
+      # Coder (Go/pgx) supports scram-sha-256 over mTLS, so enforce both a client cert and a password.
+      - hostssl app ${CODER_PSQL_USERNAME} all scram-sha-256 clientcert=verify-full

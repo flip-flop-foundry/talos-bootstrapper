@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${CODER_NAMESPACE}
+  labels:
+    initial-deploy-with-kubectl: "true"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${CODER_WORKSPACES_NAMESPACE}
+  labels:
+    initial-deploy-with-kubectl: "true"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: coder
+  namespace: ${CODER_NAMESPACE}
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"  # After cert-manager, the CNPG operator and Longhorn; DB ordering is handled by resource waves inside this app
+spec:
+  project: cluster-services
+  destination:
+    namespace: ${CODER_NAMESPACE}
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      - CreateNamespace=false
+    retry:
+      limit: 10
+      backoff:
+        duration: 20s
+        factor: 2
+        maxDuration: 10m
+  sources:
+    - repoURL: oci://ghcr.io/coder/chart/coder  # https://github.com/coder/coder/tree/main/helm/coder
+      path: .
+      targetRevision: ${CODER_HELM_VERSION}
+      helm:
+        releaseName: coder
+        valueFiles:
+          - $values/_rendered/coder/coderValues.yaml
+    - repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
+      targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
+      ref: values
+      path: _rendered/coder
+      directory:
+        recurse: false
+        include: "{coderCnpgSecretBootstrap.yaml,coderCnpgCluster.yaml,coderSecretBootstrap.yaml,coderOwnerBootstrapJob.yaml,coderWorkspaceRbac.yaml}"

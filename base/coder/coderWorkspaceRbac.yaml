@@ -1,0 +1,37 @@
+###############################################################################
+# Cross-namespace RBAC: let the Coder provisioner manage workspace Secrets
+#
+# The k8s-dev-image template creates a per-PVC LUKS key Secret in the workspaces
+# namespace (for the pvckey-* Longhorn storage class). The Coder control-plane
+# ServiceAccount (coder/coder) gets pod + PVC perms there from the chart's
+# workspacePerms, but NOT secrets — so provisioning failed with:
+#   secrets is forbidden: ... cannot create resource "secrets" in namespace
+#   "${CODER_WORKSPACES_NAMESPACE}"
+#
+# This Role adds secrets management scoped to the workspaces namespace; the
+# RoleBinding grants it to the coder SA, which lives in the control-plane
+# namespace (${CODER_NAMESPACE}) — a cross-namespace subject reference.
+###############################################################################
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: coder-workspace-secrets
+  namespace: ${CODER_WORKSPACES_NAMESPACE}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: coder-workspace-secrets
+  namespace: ${CODER_WORKSPACES_NAMESPACE}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: coder-workspace-secrets
+subjects:
+  - kind: ServiceAccount
+    name: coder
+    namespace: ${CODER_NAMESPACE}

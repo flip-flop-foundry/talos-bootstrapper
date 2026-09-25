@@ -1,0 +1,84 @@
+# Gitea Actions workflow: push Coder workspace templates whenever the rendered
+# template files change. Flattened into the env repo's .gitea/workflows/ by
+# render-overlay.sh (prefixed with the component name) + push-to-gitea.sh.
+#
+# Required Gitea repo secrets (auto-provisioned; see base/coder/README.md):
+#   CODER_SESSION_TOKEN  a Coder API token, published automatically by
+#                        gitea-bootstrap.sh (devenv side).
+#
+# NOTE ON RENDERING: render-overlay.sh runs envsubst with a whitelist that
+# contains ONLY the variables exported by the env file. Consequently:
+#   - ${CODER_DOMAIN_NAME} IS whitelisted, so it is substituted at render time
+#     (pinning the Coder URL). The CLI version no longer needs pinning: the
+#     coder/setup-action downloads the binary straight from the deployment, so
+#     it always matches the running server.
+#   - ${{ secrets.* }} are NOT whitelisted, so they pass through verbatim for
+#     Gitea Actions to resolve at run time.
+#   - The shell loop variables use the ct_* prefix precisely because they are
+#     also not whitelisted; the prefix guards against the (unlikely) case where
+#     an operator exports a plain name like `dir`/`name`/`rev` in the env file,
+#     which envsubst would otherwise wrongly substitute here.
+
+name: Push Coder Templates
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "_rendered/coder/templates/**"
+      - ".gitea/workflows/coder-templates.yaml"
+
+jobs:
+  push-templates:
+    runs-on: ubuntu-latest
+    container:
+        image: ghcr.io/catthehacker/ubuntu:act-latest
+        volumes:
+            - /etc/ssl/certs:/host-ssl-certs:ro
+    steps:
+      - name: 🔒 Install custom CA certificate
+        run: |
+          if [ ! -f /host-ssl-certs/cluster-ca.crt ]; then
+            echo "ERROR: Missing CA certificate: /host-ssl-certs/cluster-ca.crt"
+            echo "Expected source file on runner host: /etc/ssl/certs/cluster-ca.crt"
+            echo "This workflow mounts host /etc/ssl/certs -> container /host-ssl-certs (read-only)."
+            exit 1
+          fi
+          cp /host-ssl-certs/cluster-ca.crt /usr/local/share/ca-certificates/cluster-ca.crt
+          update-ca-certificates
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify required secrets
+        run: |
+          if [ -z "${{ secrets.CODER_SESSION_TOKEN }}" ]; then
+            echo "ERROR: CODER_SESSION_TOKEN repo secret is not configured."
+            echo "       It is published automatically by gitea-bootstrap.sh;"
+            echo "       see base/coder/README.md -> 'Template CI credentials'."
+            exit 1
+          fi
+
+      - name: Setup Coder CLI
+        # Pinned to the v1.1.0 release commit (not the tag) for supply-chain
+        # security. The action downloads the CLI directly from the deployment,
+        # so the binary always matches the server version and logs in for us.
+        uses: coder/setup-action@4a607a8113d4e676e2d7c34caa20a814bc88bfda # v1.1.0
+        with:
+          access_url: "https://${CODER_DOMAIN_NAME}"
+          coder_session_token: ${{ secrets.CODER_SESSION_TOKEN }}
+
+      - name: Push templates
+        run: |
+          set -eu
+          ct_rev="$(git rev-parse --short HEAD)"
+          for ct_dir in _rendered/coder/templates/*/; do
+            [ -d "$ct_dir" ] || continue
+            ct_name="$(basename "$ct_dir")"
+            echo "Pushing template '$ct_name' from '$ct_dir' (version $ct_rev)"
+            coder templates push "$ct_name" \
+              --directory "$ct_dir" \
+              --name "$ct_rev" \
+              --message "Automated push from Gitea Actions ($ct_rev)" \
+              --yes
+          done

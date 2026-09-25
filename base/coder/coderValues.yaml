@@ -1,0 +1,193 @@
+# Coder control-plane Helm values (chart: oci://ghcr.io/coder/chart/coder)
+# Only non-default values are set. See `helm show values oci://ghcr.io/coder/chart/coder`
+# for the full schema. Security hardening follows the workload standards in
+# .github/copilot-instructions.md.
+coder:
+  image:
+    repo: "ghcr.io/coder/coder"
+    tag: "${CODER_IMAGE_TAG}"  # Pinned; chart default tracks chart appVersion
+    pullPolicy: IfNotPresent
+
+  # Restart the deployment automatically when the referenced Secrets change
+  # (Gitea OIDC / external-auth credentials, composed Postgres URL). Via Reloader.
+  annotations:
+    reloader.stakater.com/auto: "true"
+
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
+  # fsGroup so the non-root (UID 1000) coder process can read the mounted CNPG
+  # client cert + CA secret volumes: with fsGroup set, the kubelet group-owns the
+  # volume files to 1000 and OR's in group read (same mechanism Gitea relies on).
+  podSecurityContext:
+    fsGroup: 1000
+
+  # hostUsers: false (user-namespace isolation) is NOT settable via this chart:
+  # it only exposes podSecurityContext (-> spec.securityContext), whereas hostUsers
+  # is a pod-spec sibling. Tracked in coderDeferredWork.md; no post-renderer per policy.
+  # Container-level hardening. runAsNonRoot/runAsUser default to 1000 in the chart.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    seccompProfile:
+      type: RuntimeDefault
+    capabilities:
+      drop:
+        - ALL
+
+  # Least-privilege service account: no workspace permissions in the control-plane
+  # namespace; scoped Role/RoleBinding are created only in the workspaces namespace.
+  serviceAccount:
+    workspacePerms: false
+    enableDeployments: false
+    workspaceNamespaces:
+      - name: ${CODER_WORKSPACES_NAMESPACE}
+        workspacePerms: true
+        enableDeployments: false  # Workspaces are Pods + PVCs, not Deployments
+
+  # Traefik ingress terminates TLS with a cert-manager-issued certificate.
+  service:
+    enable: true
+    type: ClusterIP
+  ingress:
+    enable: true
+    className: "traefik"
+    host: ${CODER_DOMAIN_NAME}
+    # Wildcard host for subdomain apps + dashboard port-forwarding (coder_app
+    # subdomain=true). Apps resolve at <app>.${CODER_DOMAIN_NAME}.
+    wildcardHost: "*.${CODER_DOMAIN_NAME}"
+    annotations:
+      cert-manager.io/cluster-issuer: ${TALOS_CLUSTER_NAME}-ca-issuer
+      external-dns.alpha.kubernetes.io/hostname: "${CODER_DOMAIN_NAME},*.${CODER_DOMAIN_NAME}"
+      advertise-via-dns: "true"
+    tls:
+      enable: true
+      secretName: cert-${CODER_DOMAIN_NAME}  # Created by cert-manager
+      # cert-manager issues *.${CODER_DOMAIN_NAME} from the CA issuer (CA signs
+      # wildcards directly; no DNS-01 needed).
+      wildcardSecretName: cert-wildcard-${CODER_DOMAIN_NAME}
+
+  # readOnlyRootFilesystem requires a writable cache/tmp dir.
+  volumes:
+    - name: tmp
+      emptyDir: {}
+    - name: psql-client-cert-vol
+      secret:
+        secretName: coder-cnpg-client-cert
+        defaultMode: 384  # 0600
+    - name: psql-ca-cert-vol
+      configMap:
+        name: cluster-ca-bundle
+        defaultMode: 384
+    # World-readable copy of the cluster CA for the TLS trust store (coder runs as
+    # UID 1000; a 0600 mount would be unreadable to it).
+    - name: internal-ca-vol
+      configMap:
+        name: cluster-ca-bundle
+        defaultMode: 292  # 0444
+  volumeMounts:
+    - name: tmp
+      mountPath: /tmp
+    - name: psql-client-cert-vol
+      readOnly: true
+      mountPath: /pg-client-crt
+    - name: psql-ca-cert-vol
+      readOnly: true
+      mountPath: /pg-ca-crt
+    # Trust the private cluster CA so coderd can verify its own Access URL / healthz
+    # (Traefik serves it with a ${TALOS_CLUSTER_NAME}-ca-issuer cert). Go reads every
+    # file in /etc/ssl/certs, so this augments the public roots rather than replacing
+    # them. Not settable via coder.certs.secrets: trust-manager emits a ConfigMap, not
+    # a Secret. See coder/coder#17979, #7194.
+    - name: internal-ca-vol
+      readOnly: true
+      mountPath: /etc/ssl/certs/cluster-internal-ca.crt
+      subPath: ca.crt
+
+  env:
+    - name: CODER_ACCESS_URL
+      value: "https://${CODER_DOMAIN_NAME}"
+    # Enables subdomain apps + dashboard port-forwarding. Must resolve to Coder
+    # (DNS wildcard *.${CODER_DOMAIN_NAME}) and is covered by wildcardSecretName above.
+    - name: CODER_WILDCARD_ACCESS_URL
+      value: "*.${CODER_DOMAIN_NAME}"
+    # With wildcard apps available, force subdomain isolation and drop path-based apps.
+    - name: CODER_DISABLE_PATH_APPS
+      value: "true"
+    - name: CODER_CACHE_DIRECTORY
+      value: /tmp/coder-cache
+    # Postgres connection URL from the CNPG-generated `coder-sql-app` secret.
+    # The `uri` key carries user/password/host/dbname but no TLS parameters; the
+    # libpq PG* env vars below supply mTLS for the parameters absent from the URL
+    # (same mechanism Gitea uses against its CNPG cluster).
+    - name: CODER_PG_CONNECTION_URL
+      valueFrom:
+        secretKeyRef:
+          name: coder-sql-app
+          key: uri
+    - name: PGSSLMODE
+      value: verify-full
+    - name: PGSSLCERT
+      value: /pg-client-crt/tls.crt
+    - name: PGSSLKEY
+      value: /pg-client-crt/tls.key
+    - name: PGSSLROOTCERT
+      value: /pg-ca-crt/ca.crt
+    # --- Gitea OIDC (interactive login) -------------------------------------
+    # Coder authenticates users against Gitea's OIDC provider. client-id/secret are
+    # auto-provisioned into the coder-oidc secret by gitea-bootstrap.sh. Marked
+    # optional so Coder still starts (OIDC disabled) before the secret exists; use
+    # the break-glass owner to bootstrap in that window. Coder verifies Gitea's TLS
+    # via the cluster CA mounted at /etc/ssl/certs above.
+    - name: CODER_OIDC_ISSUER_URL
+      value: "https://${GITEA_DOMAIN_NAME}"
+    - name: CODER_OIDC_ALLOW_SIGNUPS
+      value: "true"
+    - name: CODER_OIDC_CLIENT_ID
+      valueFrom:
+        secretKeyRef:
+          name: coder-oidc
+          key: client-id
+          optional: true
+    - name: CODER_OIDC_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: coder-oidc
+          key: client-secret
+          optional: true
+    # --- Gitea external auth (git in workspaces) ----------------------------
+    # Lets workspaces clone/push Gitea repos through Coder's git credential helper.
+    # client-id/secret auto-provisioned into coder-external-auth by gitea-bootstrap.sh.
+    # AUTH_URL/TOKEN_URL/VALIDATE_URL are explicit because the built-in gitea type
+    # defaults to gitea.com.
+    - name: CODER_EXTERNAL_AUTH_0_ID
+      value: "gitea"
+    - name: CODER_EXTERNAL_AUTH_0_TYPE
+      value: "gitea"
+    - name: CODER_EXTERNAL_AUTH_0_AUTH_URL
+      value: "https://${GITEA_DOMAIN_NAME}/login/oauth/authorize"
+    - name: CODER_EXTERNAL_AUTH_0_TOKEN_URL
+      value: "https://${GITEA_DOMAIN_NAME}/login/oauth/access_token"
+    - name: CODER_EXTERNAL_AUTH_0_VALIDATE_URL
+      value: "https://${GITEA_DOMAIN_NAME}/api/v1/user"
+    - name: CODER_EXTERNAL_AUTH_0_CLIENT_ID
+      valueFrom:
+        secretKeyRef:
+          name: coder-external-auth
+          key: client-id
+          optional: true
+    - name: CODER_EXTERNAL_AUTH_0_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: coder-external-auth
+          key: client-secret
+          optional: true

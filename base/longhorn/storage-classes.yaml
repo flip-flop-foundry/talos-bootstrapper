@@ -565,7 +565,47 @@ parameters:
     ]'
 provisioner: driver.longhorn.io
 reclaimPolicy: Retain
-
+---
+kind: StorageClass
+apiVersion: storage.k8s.io/v1
+metadata:
+  name: pvckey-2replica-notretained-backedup-ssd-wn
+  annotations:
+    field.cattle.io/description: Uses encryption key stored in secret named after pvc. Does NOT retain volumes. 2 Replicas, Backed Up daily, ssd, workernode
+allowVolumeExpansion: true
+parameters:
+  csi.storage.k8s.io/provisioner-secret-name: ${pvc.name}
+  csi.storage.k8s.io/provisioner-secret-namespace: ${pvc.namespace}
+  csi.storage.k8s.io/node-publish-secret-name: ${pvc.name}
+  csi.storage.k8s.io/node-publish-secret-namespace: ${pvc.namespace}
+  csi.storage.k8s.io/node-stage-secret-name: ${pvc.name}
+  csi.storage.k8s.io/node-stage-secret-namespace: ${pvc.namespace}
+  csi.storage.k8s.io/node-expand-secret-name: ${pvc.name}
+  csi.storage.k8s.io/node-expand-secret-namespace: ${pvc.namespace}
+  diskSelector: "ssd"
+  encrypted: "true"
+  fromBackup: ""
+  numberOfReplicas: "2"
+  replicaAutoBalance: "least-effort"
+  staleReplicaTimeout: "2880"
+  dataLocality: "best-effort"
+  nodeSelector: "workernode"
+  recurringJobSelector: '[
+    {
+    "name":"${LONGHORN_BACKUP_JOB_NAME}",
+    "isGroup":false
+    },
+    {
+    "name":"fstrim-all",
+    "isGroup":false
+    },
+    {
+    "name":"delete-excessive-snapshots-daily",
+    "isGroup":false
+    }
+    ]'
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
 ---
 kind: StorageClass
 apiVersion: storage.k8s.io/v1

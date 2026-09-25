@@ -29,6 +29,7 @@ spec:
     - "${KUBEVIRT_NAMESPACE}"
     - "${KUBEVIRT_MANAGER_NAMESPACE}"
     - "${CDI_NAMESPACE}"
+    - "${CODER_NAMESPACE}"
   destinations:
     - namespace: '*'
       server: '*'
@@ -82,6 +83,10 @@ spec:
     - namespace: "!${KUBEVIRT_MANAGER_NAMESPACE}"
       server: '*'
     - namespace: "!${CDI_NAMESPACE}"
+      server: '*'
+    - namespace: "!${CODER_NAMESPACE}"
+      server: '*'
+    - namespace: "!${CODER_WORKSPACES_NAMESPACE}"
       server: '*'
   namespaceResourceWhitelist:
   - group: '*'
