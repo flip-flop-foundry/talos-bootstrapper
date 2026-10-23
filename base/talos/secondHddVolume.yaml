@@ -9,6 +9,7 @@ provisioning:
   minSize: 11Gi
 encryption:
   provider: luks2
+  allowDiscards: true
   keys:
       - slot: 0
         kms:

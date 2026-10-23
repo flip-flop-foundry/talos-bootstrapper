@@ -1,0 +1,8 @@
+# Talos 1.14+ only. Clusters upgraded from an older release do not get this document
+# automatically, so trimming stays off until it is applied explicitly.
+# Talos spreads the actual trim time across volumes and nodes by hashing node + volume ID,
+# so nodes do not all trim at once.
+# Encrypted volumes are only trimmed when their encryption block sets allowDiscards.
+apiVersion: v1alpha1
+kind: FilesystemTrimConfig
+interval: ${TALOS_FILESYSTEM_TRIM_INTERVAL}

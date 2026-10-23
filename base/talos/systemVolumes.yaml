@@ -3,6 +3,9 @@ kind: VolumeConfig
 name: STATE
 encryption:
   provider: luks2
+  # Lets fstrim reach the backing device through the LUKS mapping. The trade is that
+  # the device then sees which blocks the filesystem considers free.
+  allowDiscards: true
   keys:
     - slot: 0
       kms:
@@ -13,6 +16,7 @@ kind: VolumeConfig
 name: EPHEMERAL
 encryption:
   provider: luks2
+  allowDiscards: true
   keys:
     - slot: 0
       kms:

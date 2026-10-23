@@ -1,0 +1,10 @@
+# Talos 1.14+ only. Pins workload isolation explicitly instead of relying on the
+# default, which differs between new clusters (talosctl gen config emits true) and
+# upgraded ones (document absent, which Talos reads as false).
+#
+# Kept false by default: Longhorn reaches the host iscsid and kubelet by locating
+# those processes in /host/proc and entering their namespaces, and that lookup was
+# written before sandboxd existed. See base/talos/README.md.
+apiVersion: v1alpha1
+kind: SecurityProfileConfig
+workloadIsolation: ${TALOS_WORKLOAD_ISOLATION}
