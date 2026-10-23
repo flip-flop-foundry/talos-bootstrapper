@@ -51,14 +51,15 @@ Talos 1.14 can run the container runtime plane — CRI containerd, the kubelet, 
 inside a dedicated PID and mount namespace anchored by the `sandboxd` service, isolating it
 from `machined` (PID 1). It is controlled by the `SecurityProfileConfig` document.
 
-The default is inconsistent, which is the reason this repo pins it:
+The default is inconsistent, which is one reason this repo pins it off:
 
 | Cluster | Default |
 |---------|---------|
 | Freshly generated at contract 1.14+ | `talosctl gen config` emits the document with `workloadIsolation: true` |
 | Upgraded from 1.13 or earlier | document absent, which Talos reads as isolation off |
 
-`TALOS_WORKLOAD_ISOLATION` (default `false`) makes both cases explicit. Talos treats an
+`securityProfileConfig.yaml` sets `workloadIsolation: false` on every node. It is not
+configurable, because every cluster built from this repo runs Longhorn (see below). Talos treats an
 explicit `false` exactly like an absent document — sandboxd is enabled only when the document
 is present *and* the field is true — so pinning it is a no-op on an upgraded cluster and only
 changes behaviour for a newly generated one.
@@ -67,7 +68,7 @@ Because `gen config` already emits this document at contract 1.14+, `securityPro
 is merged (not appended) into every node config: the strategic merge matches the singleton
 by kind and overrides `workloadIsolation`, so no duplicate document is produced.
 
-### Why it defaults to off
+### Why it is off
 
 The breakage Talos documents explicitly is the **deprecated in-tree Kubernetes iSCSI volume
 plugin**: under isolation the kubelet cannot reach the host `iscsid`. Longhorn is a CSI driver,
@@ -94,7 +95,8 @@ attaches and a replica rebuilds, then roll it out. A per-node file under `talos/
 do this (see [Per-Node Patches](#per-node-patches)); patch the one node directly instead,
 e.g. `talosctl patch machineconfig --nodes <worker> --patch @<file>` with a
 `SecurityProfileConfig` setting `workloadIsolation: true`, and reboot it. The next
-"Apply Talos configs" run reverts that node unless `TALOS_WORKLOAD_ISOLATION="true"`.
+"Apply Talos configs" run reverts that node; enabling it cluster-wide means changing
+`securityProfileConfig.yaml`.
 
 Also note that workload isolation is still settling upstream.
 [talos#14374](https://github.com/siderolabs/talos/issues/14374) (CRI restart-looping every boot

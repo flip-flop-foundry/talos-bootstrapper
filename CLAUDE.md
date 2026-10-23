@@ -315,7 +315,7 @@ overlays/<cluster>/talos/nodes/<hostname>.yaml
 
 The hostname is the short name (first label of the FQDN, e.g. `brew-10` for `brew-10.example.com`).
 
-These patches are deep-merged (patch wins) into the generated machine config during `cluster-initialSetup.sh`, after all role-level patches (base + overlay + controlplane/worker) have been applied. Only the first YAML document (the main machine config) is merged — additional documents (HostnameConfig, disk configs, etc.) are preserved unchanged.
+These patches are merged during `cluster-initialSetup.sh` with Talos' strategic merge (`talosctl machineconfig patch`): documents are matched by `kind` + `name`, and unmatched documents are appended. A per-node patch wins over every role-level patch, but **not** over the all-node manifests merged after it (`systemVolumes.yaml`, `filesystemTrimConfig.yaml`, `securityProfileConfig.yaml`) — settings in those cannot be changed per node.
 
 ### Patch Precedence (lowest to highest)
 
@@ -324,8 +324,10 @@ These patches are deep-merged (patch wins) into the generated machine config dur
 3. `overlays/<cluster>/talos/talosPatchConfig.yaml` — cluster override (wins over #2)
 4. `base/talos/talosPatchConfigControlplane.yaml` — controlplane-only (or worker equivalent)
 5. `overlays/<cluster>/talos/talosPatchConfigControlplane.yaml` — cluster override (wins over #4)
-6. Per-node customisation (disk detection, hostname, certSANs)
-7. **`overlays/<cluster>/talos/nodes/<hostname>.yaml`** — per-node patch (**wins over all above**)
+6. **`overlays/<cluster>/talos/nodes/<hostname>.yaml`** — per-node patch (wins over #1–#5)
+7. Per-node customisation (disk-detection `UserVolumeConfig`s, hostname, certSANs)
+8. All-node manifests from `base/talos/` (`systemVolumes.yaml` when a KMS URL is set, `filesystemTrimConfig.yaml`, `securityProfileConfig.yaml`) — **win over all above**
+9. Volume-encryption reconcile — keeps an already-provisioned unencrypted STATE/EPHEMERAL as-is
 
 ### Example — Disable hugepages on Raspberry Pi nodes
 
