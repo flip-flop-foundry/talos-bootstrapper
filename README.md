@@ -85,24 +85,17 @@ The `EXCLUDED_BASE` array in each `.env` file controls which components or files
 
 Per-node Talos patches live in `talos/nodes/<hostname>.yaml` inside each environment repo. The hostname is the short hostname (first DNS label), for example `k8s-test-1` for `k8s-test-1.domain.dk`.
 
-The generation logic in `devenv/.vscode/tasks/lib/talos.sh` applies per-node patches as follows:
+The generation logic in `devenv/.vscode/tasks/lib/talos.sh` merges each per-node patch with Talos' strategic merge (`talosctl machineconfig patch`): documents are matched by `kind` + `name`, and unmatched documents are appended. A patch may therefore contain only standalone documents.
 
-1. The first YAML document from the generated node machine config is treated as the primary machine config document.
-2. The first YAML document from `talos/nodes/<hostname>.yaml` is deep-merged into that primary document (patch wins on conflicts).
-3. Existing non-primary documents from the generated node config are preserved.
-4. Additional documents from `talos/nodes/<hostname>.yaml` are appended verbatim to the final node config.
-
-This means a per-node patch can safely contain both:
-
-- Document 1: regular `machine:` overrides (labels, sysctls, install settings, etc.)
-- Document 2..N: standalone Talos config documents such as `LinkConfig`, `HostnameConfig`, or other supported docs.
+At the Talos 1.14 config contract, most Kubernetes settings live in dedicated documents and are mutually exclusive with their deprecated v1alpha1 fields (for example `KubeNodeConfig` vs `.machine.nodeLabels`). Use the new document.
 
 Example:
 
 ```yaml
-machine:
-   nodeLabels:
-      egressenabled: "true"
+apiVersion: v1alpha1
+kind: KubeNodeConfig
+labels:
+   egressenabled: "true"
 ---
 apiVersion: v1alpha1
 kind: LinkConfig
@@ -116,7 +109,6 @@ Notes:
 
 - Use the real interface name from Talos (`talosctl get links`) when writing `LinkConfig.name`.
 - Include prefix length in every `addresses[].address` entry (for example `/24` or `/64`).
-- If a patch contains only a standalone document (for example only `LinkConfig` and no `machine:` document), the merge step still expects document 1 to be merge-compatible. Keep a `machine:` document first for predictable behavior.
 
 ## LoadBalancer Mode: L2 vs BGP
 
@@ -163,9 +155,10 @@ export EXCLUDED_BASE=(
 
 BGP overlays also need a Talos patch to add the `bgpPeer` node label. Create `overlays/<cluster>/talos/talosPatchConfig.yaml`:
 ```yaml
-machine:
-  nodeLabels:
-    bgpPeer: "true"
+apiVersion: v1alpha1
+kind: KubeNodeConfig
+labels:
+  bgpPeer: "true"
 ```
 
 See [overlays/yourCluster-bgp/](overlays/yourCluster-bgp/) for a complete example.

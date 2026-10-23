@@ -246,7 +246,7 @@ Advertises LoadBalancer IPs via eBGP to an external router. IPs can be any routa
   ```
   "cilium/ciliumL2AnnouncementPolicy.yaml"
   ```
-- Overlay must add `talos/talosPatchConfig.yaml` with `machine.nodeLabels.bgpPeer: "true"`
+- Overlay must add `talos/talosPatchConfig.yaml` with a `KubeNodeConfig` document setting `labels.bgpPeer: "true"` (the v1alpha1 `machine.nodeLabels` conflicts with `KubeNodeConfig` at the Talos 1.14 contract)
 
 ### Key Design
 

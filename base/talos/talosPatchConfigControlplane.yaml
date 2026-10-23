@@ -11,3 +11,13 @@ machine:
       allowedKubernetesNamespaces:
         - longhorn-system
         - kube-system
+---
+# Cilium replaces kube-proxy
+apiVersion: v1alpha1
+kind: KubeProxyConfig
+enabled: false
+---
+# Cilium is the CNI; without this document Talos deploys no CNI
+apiVersion: v1alpha1
+kind: KubeFlannelCNIConfig
+$patch: delete

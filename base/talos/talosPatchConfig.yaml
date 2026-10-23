@@ -1,6 +1,15 @@
 version: v1alpha1
 machine:
+  # Kept in the deprecated v1alpha1 .machine.kubelet on purpose: Talos 1.14's KubeletConfig
+  # document has NO equivalent of extraMounts, which Longhorn needs for /var/lib/longhorn.
+  # The two are mutually exclusive, so the generated KubeletConfig is deleted below and its
+  # image/seccomp/manifests settings are carried here instead.
+  # https://github.com/siderolabs/talos/issues/14365 (closed: no replacement planned)
+  # https://github.com/siderolabs/talos/issues/14411 (open: keep /var/lib mounts on 1.14)
   kubelet:
+    image: ghcr.io/siderolabs/kubelet:v${KUBERNETES_VERSION}
+    defaultRuntimeSeccompProfileEnabled: true
+    disableManifestsDirectory: true
     extraMounts:
       - destination: /var/lib/longhorn #https://longhorn.io/docs/1.11.0/advanced-resources/os-distro-specific/talos-linux-support/#data-path-mounts
         source: /var/lib/longhorn
@@ -20,9 +29,6 @@ machine:
   sysctls:
     vm.nr_hugepages: "1024"
     user.max_user_namespaces: "11255" #Enable user namespaces support, https://docs.siderolabs.com/kubernetes-guides/security/usernamespace
-  features:
-    hostDNS:
-      forwardKubeDNSToHost: false
   # Required for Spegel on Talos — https://spegel.dev/docs/getting-started/#talos
   # Talos enables discard_unpacked_layers by default, which prevents Spegel from
   # serving cached image layers to peers. This must be disabled explicitly.
@@ -42,14 +48,19 @@ machine:
 
         [plugins."io.containerd.cri.v1.runtime"]
           device_ownership_from_security_context = true
-cluster:
-  allowSchedulingOnControlPlanes: $TALOS_ALLOW_SCHEDULING_ON_CONTROLPLANES
-  network:
-    cni:
-        name: none
-    podSubnets:
-      - "$POD_CIDR"
-    serviceSubnets:
-      - "$SERVICE_CIDR"
-  proxy:
-    disabled: true
+---
+apiVersion: v1alpha1
+kind: KubeletConfig
+$patch: delete
+---
+apiVersion: v1alpha1
+kind: ResolverConfig
+hostDNS:
+  forwardKubeDNSToHost: false
+---
+apiVersion: v1alpha1
+kind: KubeNetworkConfig
+podSubnets:
+  - "$POD_CIDR"
+serviceSubnets:
+  - "$SERVICE_CIDR"
