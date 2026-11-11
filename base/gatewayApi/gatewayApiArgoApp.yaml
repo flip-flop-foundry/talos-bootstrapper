@@ -1,0 +1,29 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gateway-api
+  namespace: ${ARGOCD_NAMESPACE}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+    bootstrapper.talos.dev/required-before-argo-hook: deploymentHooks/beforeArgo/20-gateway-api-migration.sh
+spec:
+  project: cluster-services
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ${ARGOCD_NAMESPACE}
+  source:
+    repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
+    targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
+    path: _rendered/gatewayApi/templates
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m

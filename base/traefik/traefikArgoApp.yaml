@@ -11,6 +11,8 @@ kind: Application
 metadata:
   name: traefik
   namespace: traefik
+  annotations:
+    bootstrapper.talos.dev/required-before-argo-hook: deploymentHooks/beforeArgo/20-gateway-api-migration.sh
 spec:
   project: cluster-services
   destination:
@@ -44,4 +46,3 @@ spec:
       directory:
         recurse: false
         exclude: "{traefikHelmValues.yaml,traefikArgoApp.yaml}"
-

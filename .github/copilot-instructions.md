@@ -96,6 +96,27 @@ $devenv/.vscode/tasks/render-overlay.sh $env/<env>.env
 
 ## File Naming Conventions
 
+### Deployment hooks
+
+`base/deploymentHooks/beforeArgo/*.sh` contains trusted Bash-compatible hooks.
+Overlay files replace base scripts by exact relative path; `EXCLUDED_BASE`
+matches either `deploymentHooks` or an exact component/path, applying to both
+sources. Scripts are copied verbatim without envsubst; rendering never executes
+them. Devenv's runner discovers current sources and gives hooks a fresh isolated
+render plus validated Kubernetes context. Dry runs skip execution; hook failure
+blocks normal/temporary bootstrap Argo publication. Hook scripts and Talos
+configs must never enter Argo-watched Git publication directories.
+Apps may declare `bootstrapper.talos.dev/required-before-argo-hook`; publication
+blocks if that exact hook is missing/excluded while the dependent app is included.
+Overlay replacement is trusted code and must preserve equivalent safety checks.
+`beforeTalos` is reserved, **not wired**; do not modify Talos entrypoints.
+Authoring workflow: `.github/skills/create-deployment-hook/SKILL.md`.
+Gateway API CRDs are separately managed by `gateway-api` (standard v1.6.3);
+Traefik defaults to chart 42.3.1 / app v3.7.17. The legacy handover requires
+quiesced Argo application controllers and live protection/adoption verification;
+see `base/gatewayApi/README.md`. Do not disable the gate or downgrade experimental
+installations to make an upgrade proceed.
+
 - ArgoCD Application: `<component>ArgoApp.yaml`
 - Helm values: `<component>HelmValues.yaml`
 - Bootstrap secrets: `<component>SecretsBootstrap.yaml`

@@ -83,3 +83,12 @@ The Traefik dashboard is available internally and shows all routers, services, a
 kubectl -n <traefik-namespace> port-forward svc/traefik 9000:9000
 # Then open http://localhost:9000/dashboard/
 ```
+# Gateway API ownership
+
+Default chart is **42.3.1**, proxy **v3.7.17** (Kubernetes >=1.30).
+Gateway API CRDs are now independently managed by the shared `gateway-api`
+Application, not bundled with this chart. Existing env versions are not edited
+automatically. Before upgrading an existing cluster, follow
+[`../gatewayApi/README.md`](../gatewayApi/README.md) for the mandatory legacy
+ownership/protection/adoption sequence. Never delete Gateway CRDs to resolve
+shared-resource warnings or bypass the beforeArgo migration gate.

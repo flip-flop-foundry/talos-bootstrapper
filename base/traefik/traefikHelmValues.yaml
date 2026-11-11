@@ -26,11 +26,11 @@ ingressRoute:
 service:
   enabled: true
   single: true  # One Service for both TCP and UDP
-  type: LoadBalancer
   annotations:
     advertise-via-dns: "true"  # Critical for ExternalDNS management
     external-dns.alpha.kubernetes.io/hostname: traefik.${CLUSTER_EXTERNAL_DOMAIN}  # Critical for ExternalDNS management
   spec:
+    type: LoadBalancer  # Chart 42 uses service.spec.type (service.type was removed).
     # Use Cluster policy as the safe default for both L2 and BGP when Traefik
     # pods are free to schedule anywhere. Any eligible ingress node can receive
     # traffic and Cilium will forward to any ready backend pod, local or remote.
