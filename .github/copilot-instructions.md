@@ -111,7 +111,8 @@ blocks if that exact hook is missing/excluded while the dependent app is include
 Overlay replacement is trusted code and must preserve equivalent safety checks.
 `beforeTalos` is reserved, **not wired**; do not modify Talos entrypoints.
 Authoring workflow: `.github/skills/create-deployment-hook/SKILL.md`.
-Gateway API CRDs are separately managed by `gateway-api` (standard v1.6.3);
+Gateway API CRDs are separately managed by `gateway-api`, sourced from upstream git
+(standard channel) at `GATEWAY_API_VERSION` from the env file — nothing vendored;
 Traefik defaults to chart 42.3.1 / app v3.7.17. The legacy handover asks for
 admin approval, disables auto-sync on the Traefik Application only (waiting for
 Argo's refresh acknowledgment and any running sync), and protects the CRDs before
@@ -187,7 +188,7 @@ Each cluster has one `.env` file exporting all configuration. Key variable group
 | Group | Example Variables |
 |-------|-------------------|
 | Talos | `OVERLAY_NAME`, `CLUSTER_EXTERNAL_DOMAIN`, `POD_CIDR`, `SERVICE_CIDR`, `KUBERNETES_VERSION`, `TALOS_CONTROL_NODES`, `TALOS_WORKER_NODES`, `TALOS_INSTALL_VERSION`, `TALOS_INSTALLER_TYPE`, `TALOS_SCHEMATIC_EXTENSIONS`, `TALOS_SCHEMATIC_EXTRA_KERNEL_ARGS` |
-| Helm versions | `CILIUM_HELM_VERSION`, `TRAEFIK_HELM_VERSION`, `ARGOCD_HELM_VERSION`, `CERT_MGR_HELM_VERSION`, `LONGHORN_CHART_VERSION`, `CNPG_HELM_VERSION`, `EXTERNAL_DNS_HELM_VERSION`, `METRICS_SERVER_HELM_VERSION`, `RELOADER_HELM_VERSION`, `GITEA_HELM_VERSION` |
+| Helm versions | `CILIUM_HELM_VERSION`, `TRAEFIK_HELM_VERSION`, `GATEWAY_API_VERSION`, `ARGOCD_HELM_VERSION`, `CERT_MGR_HELM_VERSION`, `LONGHORN_CHART_VERSION`, `CNPG_HELM_VERSION`, `EXTERNAL_DNS_HELM_VERSION`, `METRICS_SERVER_HELM_VERSION`, `RELOADER_HELM_VERSION`, `GITEA_HELM_VERSION` |
 | Networking | `CILIUM_LB_IP_CIDR` (LoadBalancer IP pool), `CILIUM_BGP_LOCAL_ASN`, `CILIUM_BGP_PEER_ASN`, `CILIUM_BGP_PEER_ADDRESS` (BGP only) |
 | Storage | `LONGHORN_BACKUP_TARGET`, `LONGHORN_BACKUP_CRON_SCHEDULE`, `LONGHORN_BACKUP_RETAIN` |
 | DNS | `EXTERNAL_DNS_BINDSERVER_IP`, `EXTERNAL_DNS_TSIG_KEYNAME`, `EXTERNAL_DNS_DOMAIN_FILTERS` |

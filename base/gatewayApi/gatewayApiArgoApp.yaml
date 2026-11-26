@@ -12,9 +12,14 @@ spec:
     server: https://kubernetes.default.svc
     namespace: ${ARGOCD_NAMESPACE}
   source:
-    repoURL: ${GITEA_CLUSTER_SERVICES_REPO_URL}
-    targetRevision: ${GITEA_CLUSTER_SERVICES_REPO_BRANCH}
-    path: _rendered/gatewayApi/templates
+    # Upstream standard-channel bundle (same content as the release's standard-install.yaml).
+    repoURL: https://github.com/kubernetes-sigs/gateway-api.git
+    targetRevision: ${GATEWAY_API_VERSION}
+    path: config/crd
+    kustomize:
+      commonAnnotations:
+        # Never prune/delete Gateway API CRDs automatically: that would delete every Gateway/route.
+        argocd.argoproj.io/sync-options: Prune=false,Delete=false
   syncPolicy:
     automated:
       prune: true

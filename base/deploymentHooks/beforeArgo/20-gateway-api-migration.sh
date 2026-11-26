@@ -6,7 +6,6 @@ set -euo pipefail
 : "${HOOK_KUBE_CONTEXT:?validated Kubernetes context required}"
 python3 - <<'PY'
 import json
-import hashlib
 import os
 from pathlib import Path
 import re
@@ -22,25 +21,9 @@ REFRESH = "argocd.argoproj.io/refresh"
 APPROVAL = "bootstrapper.talos.dev/gateway-api-migration-approved"
 POLL_SECONDS = float(os.environ.get("GATEWAY_API_MIGRATION_POLL_SECONDS", "2"))
 GROUP = "gateway.networking.k8s.io"
-PIN = (1, 6, 3)
 LEGACY_OWNERS = {"traefik", "traefik_traefik"}  # Argo apps-in-any-namespace InstanceName.
-CRD_NAMES = {f"{name}.{GROUP}" for name in (
-    "backendtlspolicies", "gatewayclasses", "gateways", "grpcroutes", "httproutes",
-    "listenersets", "referencegrants", "tcproutes", "tlsroutes", "udproutes")}
-UPSTREAM_HASHES = {
-    "backendtlspolicies": "d9824b82db284bdea67d2eb0297952be51e0e7a394f02daef0d6f3fefa5d01c0",
-    "gatewayclasses": "d32070cb6930273a07c5ca183135712b1918cc140c6d9b6cef441cdf0e562345",
-    "gateways": "905c89d8fefaab9088bf9d0a8d47ebd7ec4e653a914d4bfaa575a7716f07a828",
-    "grpcroutes": "a96b307008290c194ad346f9bb9346dd560c12e4d4e7dfbdbe7d2fb5e812d62e",
-    "httproutes": "a89d17ff5ed060fa0eac015524f9252bb291f616412c13ac8cb952ed9c25c5ad",
-    "listenersets": "b81f1771dcd96dfb3bb500e07dafef79a2aa58c4a9b4b366d54ca29e8ecccb5e",
-    "referencegrants": "ff8db85aaacc91fb4096975afb5782540572bf2f04842a258094cd7f50c7f38a",
-    "tcproutes": "5d2891484c870865e9ae61402b412a8b81eea381fbb71fdc56406e533c9643f1",
-    "tlsroutes": "b9277b755ee0f33dd245d3497ba842922ff2e2efe5070b0911e58d072d55ed9c",
-    "udproutes": "a552a9aa3726367c392000a45d13e6ba07985117a5e6826364640bedfeb5e922",
-    "vap_safeupgrades": "66b1d7b2c392c0e4dd4b2950e2af62811f8288a65e50708e2b3d26d4433af84c",
-}
-
+UPSTREAM_REPO = "https://github.com/kubernetes-sigs/gateway-api.git"
+UPSTREAM_PATH = "config/crd"  # Upstream standard-channel Kustomization.
 
 def fail(message):
     raise RuntimeError(message)
@@ -147,63 +130,67 @@ def chart_version(app):
     return str(charts[0]["targetRevision"])
 
 
-def compatibility(crds):
+def semver(value):
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", value or "")
+    return tuple(map(int, match.groups())) if match else None
+
+
+def desired_bundle(gateway):
+    # The gateway-api Application must render upstream's standard bundle at the
+    # env's GATEWAY_API_VERSION, protected against prune/delete by Argo.
+    source = gateway["spec"].get("source") or {}
+    revision = str(source.get("targetRevision", ""))
+    if source.get("repoURL") != UPSTREAM_REPO or source.get("path") != UPSTREAM_PATH:
+        fail(f"Gateway API Application must use {UPSTREAM_REPO} path {UPSTREAM_PATH} (standard channel)")
+    if not (semver(revision) or re.fullmatch(r"[0-9a-f]{40}", revision)):
+        fail(f"GATEWAY_API_VERSION must be a release tag like v1.6.3 or a full commit SHA, got {revision!r}")
+    if not protected({"metadata": {"annotations": (source.get("kustomize") or {}).get("commonAnnotations", {})}}):
+        fail("Gateway API Application must set kustomize.commonAnnotations sync-options Prune=false,Delete=false")
+    # Build exactly what Argo will render, so compatibility is checked against the real target.
+    url = f"{UPSTREAM_REPO.removesuffix('.git')}/{UPSTREAM_PATH}?ref={revision}"
+    built = command(["kubectl", "kustomize", url])
+    text = command(["yq", "-o=json", "-I=0", 'select(.kind == "CustomResourceDefinition")'], built)
+    desired = {}
+    for line in text.splitlines():
+        if line.strip():
+            crd = json.loads(line)
+            desired[crd["metadata"]["name"]] = crd
+    if not desired:
+        fail(f"Upstream Gateway API bundle at {revision!r} contains no CRDs")
+    versions = set()
+    for crd in desired.values():
+        annotations = crd["metadata"].get("annotations", {})
+        if annotations.get("gateway.networking.k8s.io/channel") != "standard":
+            fail(f"Upstream bundle at {revision!r} is not the standard channel")
+        versions.add(annotations.get("gateway.networking.k8s.io/bundle-version"))
+    if len(versions) != 1 or not semver(next(iter(versions))):
+        fail(f"Upstream bundle at {revision!r} has inconsistent/unknown bundle versions {sorted(map(str, versions))}")
+    version = next(iter(versions))
+    if semver(revision) and semver(revision) != semver(version):
+        fail(f"GATEWAY_API_VERSION {revision} does not match the bundle's own version {version}")
+    return version, desired
+
+
+def compatibility(gateway, crds):
     # Includes non-Traefik-owned CRDs: an independent experimental installation
     # must never silently become standard just because no migration is needed.
-    directory = Path(os.environ["HOOK_RENDERED_DIR"]) / "gatewayApi" / "templates"
-    for suffix, digest in UPSTREAM_HASHES.items():
-        file = directory / f"{GROUP}_{suffix}.yaml"
-        if not file.is_file() or hashlib.sha256(file.read_bytes()).hexdigest() != digest:
-            fail(f"{file.name}: pinned upstream file missing/modified/excluded; refusing unreviewed bundle")
-    desired = {}
-    for file in sorted(directory.glob("*.yaml")):
-        text = command(["yq", "-o=json", "-I=0", 'select(.kind == "CustomResourceDefinition")', str(file)])
-        for line in text.splitlines():
-            if line.strip():
-                crd = json.loads(line)
-                annotations = crd["metadata"].get("annotations", {})
-                if (annotations.get("gateway.networking.k8s.io/channel") != "standard"
-                        or annotations.get("gateway.networking.k8s.io/bundle-version") != "v1.6.3"):
-                    fail("Desired Gateway API CRDs are not the pinned standard v1.6.3 bundle")
-                desired[crd["metadata"]["name"]] = crd
-    if set(desired) != CRD_NAMES:
-        fail("Gateway API Application included but its complete pinned CRD set is missing/excluded")
-    kustomization = json.loads(command(["yq", "-o=json", "-I=0", ".", str(directory / "kustomization.yaml")]))
-    if not protected({"metadata": {"annotations": kustomization.get("commonAnnotations", {})}}):
-        fail("Gateway API Kustomization must protect desired resources with Prune=false,Delete=false")
-    resource_names = set(kustomization.get("resources", []))
-    if (not resource_names or any("/" in name or not (directory / name).is_file() for name in resource_names)
-            or any(file.name not in resource_names for file in directory.glob("gateway.networking.k8s.io_*.yaml"))):
-        fail("Gateway API Kustomization must include all pinned local resources, with no remote sources")
-    if "gateway.networking.k8s.io_vap_safeupgrades.yaml" not in resource_names:
-        fail("Gateway API standard bundle must include its safe-upgrades admission policy")
-    # Validate the actual Kustomize result too; an overlay patch must not undo
-    # protection or change upstream schemas while retaining their version labels.
-    built = command(["kubectl", "kustomize", str(directory)])
-    rendered = command(["yq", "-o=json", "-I=0", 'select(.kind == "CustomResourceDefinition")'], built)
-    transformed = [json.loads(line) for line in rendered.splitlines() if line.strip()]
-    if {x["metadata"]["name"] for x in transformed} != CRD_NAMES:
-        fail("Kustomize result does not contain exactly the pinned Gateway CRDs")
-    for crd in transformed:
-        if not protected(crd) or crd["spec"] != desired[crd["metadata"]["name"]]["spec"]:
-            fail("Kustomize overlays must preserve CRD protection and pinned upstream schemas")
+    target, desired = desired_bundle(gateway)
     for crd in crds:
         name = crd["metadata"]["name"]
         annotations = crd["metadata"].get("annotations", {})
         if annotations.get("gateway.networking.k8s.io/channel") != "standard":
             fail(f"{name}: experimental/unknown channel; select and review an appropriate bundle manually, no auto-downgrade")
         version = annotations.get("gateway.networking.k8s.io/bundle-version", "")
-        match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", version)
-        if not match or tuple(map(int, match.groups())) > PIN:
-            fail(f"{name}: unknown/newer bundle {version!r}; refusing downgrade to v1.6.3")
+        if not semver(version) or semver(version) > semver(target):
+            fail(f"{name}: unknown/newer bundle {version!r}; refusing downgrade to {target}")
         if name not in desired:
-            fail(f"{name}: not in the standard v1.6.3 bundle; refusing automatic handover")
-        target = desired[name]
-        versions = {x["name"] for x in target["spec"]["versions"]}
+            fail(f"{name}: not in the standard {target} bundle; refusing automatic handover")
+        versions = {x["name"] for x in desired[name]["spec"]["versions"]}
         stored = set(crd.get("status", {}).get("storedVersions", []))
         served = {x["name"] for x in crd["spec"]["versions"] if x.get("served")}
         if not (stored | served) <= versions:
             fail(f"{name}: live stored/served versions {sorted(stored | served)} incompatible with target {sorted(versions)}; migrate storage/clients first")
+    print(f"[gateway-api] Target bundle: standard {target}")
 
 
 def check_tracking(legacy):
@@ -321,19 +308,16 @@ def main():
         print("[gateway-api] SKIP: gatewayApi Application not included; no handover requested")
         return
     spec = gateway["spec"]
-    if (spec.get("source", {}).get("path") != "_rendered/gatewayApi/templates"
-            or spec.get("source", {}).get("repoURL") != os.environ.get("GITEA_CLUSTER_SERVICES_REPO_URL")
-            or spec.get("source", {}).get("targetRevision") != os.environ.get("GITEA_CLUSTER_SERVICES_REPO_BRANCH")
-            or gateway["metadata"].get("namespace") != os.environ.get("ARGOCD_NAMESPACE", "argocd")
+    if (gateway["metadata"].get("namespace") != os.environ.get("ARGOCD_NAMESPACE", "argocd")
             or spec.get("destination", {}).get("server") != "https://kubernetes.default.svc"
             or "ServerSideApply=true" not in spec.get("syncPolicy", {}).get("syncOptions", [])
             or "FailOnSharedResource=true" in spec.get("syncPolicy", {}).get("syncOptions", [])):
-        fail("Gateway API Application must use this environment's repository/branch, local cluster, pinned bundle, SSA, and allow shared-resource adoption")
+        fail("Gateway API Application must target the local cluster, use SSA, and allow shared-resource adoption")
     if target_app and not unbundled:
         fail(f"Target Traefik chart {target_version!r} is bundled or unaudited. Use audited 42.3.1 before including gatewayApi")
     if legacy and not target_app:
         fail("Legacy Traefik ownership exists but target Traefik Application is absent; refusing removal without reviewed handover")
-    compatibility(crds)
+    compatibility(gateway, crds)
     if not legacy:
         print("[gateway-api] SKIP: no legacy Traefik-owned Gateway CRDs" +
               (" (reachable fresh bootstrap; Argo Application API absent)" if not api else ""))
