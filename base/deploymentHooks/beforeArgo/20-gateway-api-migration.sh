@@ -17,6 +17,9 @@ import time
 SYNC = "argocd.argoproj.io/sync-options"
 TRACK = "argocd.argoproj.io/tracking-id"
 REFRESH = "argocd.argoproj.io/refresh"
+# Recorded on the Traefik Application when the administrator approves, so
+# reruns of the same migration (e.g. Apply Overlay's push gate) don't re-ask.
+APPROVAL = "bootstrapper.talos.dev/gateway-api-migration-approved"
 POLL_SECONDS = float(os.environ.get("GATEWAY_API_MIGRATION_POLL_SECONDS", "2"))
 GROUP = "gateway.networking.k8s.io"
 PIN = (1, 6, 3)
@@ -191,7 +194,7 @@ def check_tracking(legacy):
         fail("Gateway CRD Argo installation ID does not match this controller; review ownership manually")
 
 
-def confirm(legacy):
+def confirm(legacy, pause):
     if os.environ.get("GATEWAY_API_MIGRATION_APPROVED") == "true":
         print("[gateway-api] Approved via GATEWAY_API_MIGRATION_APPROVED=true")
         return
@@ -202,11 +205,12 @@ def confirm(legacy):
              "or set GATEWAY_API_MIGRATION_APPROVED=true. Nothing was changed.")
     with tty:
         tty.write(f"\n[gateway-api] {len(legacy)} Gateway API CRD(s) are managed by the Traefik Application.\n"
-                  "This migration will:\n"
-                  "  1. Disable auto-sync for the Traefik Application only (other apps keep syncing).\n"
-                  "  2. Wait for ArgoCD to acknowledge that and for any Traefik sync to finish.\n"
-                  "  3. Protect those CRDs against prune/delete (Prune=false,Delete=false).\n"
-                  "Traefik auto-sync is re-enabled when Apply Overlay applies the new Traefik Application.\n"
+                  "This migration will:\n" +
+                  ("  - Disable auto-sync for the Traefik Application only (other apps keep syncing).\n"
+                   "  - Wait for ArgoCD to acknowledge that and for any Traefik sync to finish.\n" if pause else "") +
+                  "  - Protect those CRDs against prune/delete (Prune=false,Delete=false).\n" +
+                  ("Traefik auto-sync is re-enabled when Apply Overlay applies the new Traefik Application.\n"
+                   if pause else "") +
                   "Continue? [y/N] ")
         tty.flush()
         if tty.readline().strip().lower() not in ("y", "yes"):
@@ -237,7 +241,7 @@ def wait_for(app, timeout):
         time.sleep(POLL_SECONDS)
 
 
-def pause_autosync(app, api):
+def check_pausable(app, api):
     metadata = app["metadata"]
     if metadata.get("ownerReferences") or metadata.get("annotations", {}).get(TRACK):
         fail("Traefik Application has a parent manager that would revert disabling auto-sync; review before handover")
@@ -247,8 +251,13 @@ def pause_autosync(app, api):
         "syncPolicy", {}).get("properties", {}).get("automated", {}).get("properties", {})
     if "enabled" not in automated_schema:
         fail("Installed ArgoCD does not support spec.syncPolicy.automated.enabled (requires ArgoCD 3.x); upgrade ArgoCD first")
+
+
+def pause_autosync(app):
+    metadata = app["metadata"]
     annotations = dict(metadata.get("annotations", {}))
     annotations[REFRESH] = "normal"
+    annotations[APPROVAL] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     patch = [{"op": "test", "path": "/metadata/resourceVersion", "value": metadata["resourceVersion"]},
              {"op": "add", "path": "/metadata/annotations", "value": annotations}]
     if (app["spec"].get("syncPolicy") or {}).get("automated") is not None:
@@ -322,17 +331,21 @@ def main():
         print("[gateway-api] Handover in progress: CRDs protected and live Traefik already uses the target chart; "
               "waiting for gateway-api to adopt them. No changes.")
         return
-    if chart_version(app) != target_version:
+    # The live (old) chart still declares these CRDs; its self-heal could
+    # revert or prune them, so Traefik must stop syncing first.
+    pause = chart_version(app) != target_version
+    if pause:
         if ((target_app["spec"].get("syncPolicy") or {}).get("automated") or {}).get("enabled") is not True:
             fail("Rendered Traefik Application must set spec.syncPolicy.automated.enabled: true so Apply Overlay "
                  "re-enables the auto-sync this migration disables")
-        # The live (old) chart still declares these CRDs; its self-heal could
-        # revert or prune them, so Traefik must stop syncing first. Approval is
-        # only asked once: reruns (e.g. Apply Overlay's push gate) find it disabled.
-        automated = (app["spec"].get("syncPolicy") or {}).get("automated")
-        if automated is not None and automated.get("enabled") is not False:
-            confirm(legacy)
-        pause_autosync(app, api)
+        check_pausable(app, api)
+    # Every check is done; nothing has been written yet. Ask before the first write.
+    if APPROVAL in app["metadata"].get("annotations", {}):
+        print(f"[gateway-api] Continuing migration approved at {app['metadata']['annotations'][APPROVAL]}")
+    else:
+        confirm(legacy, pause)
+    if pause:
+        pause_autosync(app)
     for name in sorted(x["metadata"]["name"] for x in legacy):
         crd = get("crd", name)  # Re-read: the wait above may have taken a while.
         values = options(crd)

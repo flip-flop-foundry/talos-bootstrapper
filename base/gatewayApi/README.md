@@ -25,8 +25,11 @@ Before any publication, the `beforeArgo` hook
    it prints `SKIP` and changes nothing (also on fresh bootstraps).
 2. **Compatibility.** Experimental, unknown, newer or storage-incompatible
    installations block — never auto-downgraded.
-3. **Approval.** The administrator is asked to confirm in the terminal.
-   Non-interactive runs block unless `GATEWAY_API_MIGRATION_APPROVED=true`.
+3. **Approval.** After all checks pass and before the first cluster write, the
+   administrator is asked to confirm in the terminal. Approval is recorded on the
+   Traefik Application (`bootstrapper.talos.dev/gateway-api-migration-approved`)
+   so reruns of the same handover don't ask again. Non-interactive runs block
+   unless `GATEWAY_API_MIGRATION_APPROVED=true`.
 4. **Traefik-only pause.** Sets `spec.syncPolicy.automated.enabled=false` on the
    Traefik Application **only** (ArgoCD 3.x) together with a refresh request.
    Other Applications keep syncing. The hook waits until ArgoCD removes the
