@@ -63,15 +63,37 @@ def get(*args):
     return json.loads(text) if text.strip() else None
 
 
+AMBIGUOUS = object()
+_argocd_cm = None
+
+
+def argocd_cm():
+    # Absent argocd-cm (fresh bootstrap) means Argo defaults; query errors still fail.
+    global _argocd_cm
+    if _argocd_cm is None:
+        cm = get("configmap", "argocd-cm", "-n", os.environ.get("ARGOCD_NAMESPACE", "argocd"), "--ignore-not-found")
+        _argocd_cm = (cm or {}).get("data") or {}
+    return _argocd_cm
+
+
 def owner(crd):
+    # Returns the owning Argo app, None when Argo does not track the CRD, or
+    # AMBIGUOUS. Argo only prunes live objects carrying its tracking metadata;
+    # untracked objects (e.g. Helm crds/ applied by Argo) are never pruned.
+    data = argocd_cm()
+    method = data.get("application.resourceTrackingMethod") or "annotation"  # Argo 3.x default.
     metadata = crd["metadata"]
-    tracking = metadata.get("annotations", {}).get(TRACK)
-    if tracking:
+    if method in ("annotation", "annotation+label"):
+        tracking = metadata.get("annotations", {}).get(TRACK)
+        if not tracking:
+            return None
         app, separator, identity = tracking.partition(":")
         if separator and identity == f"apiextensions.k8s.io/CustomResourceDefinition:/{metadata['name']}":
             return app
-        return None  # Non-self-referencing tracking annotations aren't ownership.
-    return metadata.get("labels", {}).get("app.kubernetes.io/instance")
+        return AMBIGUOUS
+    if method == "label":
+        return metadata.get("labels", {}).get(data.get("application.instanceLabelKey") or "app.kubernetes.io/instance")
+    fail(f"Unsupported Argo resourceTrackingMethod {method!r}; review ownership manually")
 
 
 def options(resource):
@@ -185,11 +207,7 @@ def compatibility(crds):
 
 
 def check_tracking(legacy):
-    data = get("configmap", "argocd-cm", "-n", os.environ.get("ARGOCD_NAMESPACE", "argocd")).get("data", {})
-    if (data.get("application.resourceTrackingMethod") not in ("annotation", "annotation+label")
-            or data.get("application.instanceLabelKey", "app.kubernetes.io/instance") != "app.kubernetes.io/instance"):
-        fail("Migration requires standard annotation or annotation+label Argo tracking; review custom tracking manually")
-    installation = data.get("installationID", "")
+    installation = argocd_cm().get("installationID", "")
     if any(crd["metadata"].get("annotations", {}).get("argocd.argoproj.io/installation-id", "") != installation for crd in legacy):
         fail("Gateway CRD Argo installation ID does not match this controller; review ownership manually")
 
@@ -281,16 +299,13 @@ def main():
                     if x.get("group") == "apiextensions.k8s.io" and x.get("kind") == "CustomResourceDefinition"
                     and x.get("name", "").endswith("." + GROUP)}
     legacy = [x for x in crds if owner(x) in LEGACY_OWNERS]
-    # An empty recognized-owner set is not enough to prove no legacy resources:
-    # custom label tracking may own status-listed CRDs under another label key.
     status_live = [x for x in crds if x["metadata"]["name"] in status_names]
-    if status_live:
-        data = get("configmap", "argocd-cm", "-n", os.environ.get("ARGOCD_NAMESPACE", "argocd")).get("data", {})
-        if (data.get("application.resourceTrackingMethod") not in ("annotation", "annotation+label")
-                or data.get("application.instanceLabelKey", "app.kubernetes.io/instance") != "app.kubernetes.io/instance"):
-            fail("Status lists live Gateway CRDs but Argo tracking is unsupported/custom; cannot safely skip legacy migration")
-        if any(owner(x) is None for x in status_live):
-            fail("Status lists live Gateway CRDs with unrecognized/non-self-referencing tracking; cannot establish ownership for a safe skip")
+    if any(owner(x) is AMBIGUOUS for x in status_live):
+        fail("Status lists live Gateway CRDs with unrecognized/non-self-referencing tracking; cannot establish ownership for a safe skip")
+    untracked = sorted(x["metadata"]["name"] for x in status_live if owner(x) is None)
+    if untracked:
+        print(f"[gateway-api] {len(untracked)} Gateway CRD(s) rendered by Traefik carry no Argo tracking metadata; "
+              "Argo will not prune them when the chart drops them: " + ", ".join(untracked))
     if legacy and not app:
         fail("Traefik-owned Gateway CRDs exist without the Traefik Application; cannot establish safe handover")
     if any(x["metadata"]["name"] not in status_names for x in legacy):

@@ -22,7 +22,11 @@ Before any publication, the `beforeArgo` hook
 **Render and Push to Gitea** and **Apply Overlay**:
 
 1. **Relevance first.** If no Gateway CRD is tracked by the Traefik Application,
-   it prints `SKIP` and changes nothing (also on fresh bootstraps).
+   it prints `SKIP` and changes nothing (also on fresh bootstraps). Argo only
+   prunes live objects carrying its tracking metadata, and CRDs that Argo applied
+   from a Helm chart's `crds/` directory carry none (verified on dkk8s1, Argo
+   3.3.7). Such untracked CRDs are reported and left alone: dropping them from the
+   chart cannot delete them, so no pause or approval is needed.
 2. **Compatibility.** Experimental, unknown, newer or storage-incompatible
    installations block — never auto-downgraded.
 3. **Approval.** After all checks pass and before the first cluster write, the
@@ -54,6 +58,15 @@ already-running reconcile will not start one more old-chart sync. The refresh
 acknowledgment does, because ArgoCD never processes the same Application
 concurrently and the refresh annotation is only removed by a refresh that read
 the patched object.
+
+## Cilium 1.19 caveat
+
+Cilium 1.19 (checked up to 1.19.11) treats the optional `TLSRoute` `v1alpha2`
+version as present when it is merely *listed* in the CRD. The standard v1.6.x
+`TLSRoute` CRD lists `v1alpha2` but does not serve it, so the Cilium 1.19
+operator may fail to watch it. Do not install this bundle on a cluster running
+Cilium 1.19 with `gatewayAPI.enabled: true` without verifying the operator stays
+healthy; prefer installing it together with the Cilium 1.20 upgrade.
 
 ## Administrator sequence (dkk8s1)
 
