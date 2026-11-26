@@ -25,7 +25,12 @@ description: 'Create or update deployment hooks in deploymentHooks/beforeArgo/*.
    resource-version preconditions for read-modify-write, and verify live
    postconditions before allowing publication. Avoid deletes. Investigate
    controller reconciliation races; an added live annotation or short sleep
-   is not proof of quiescence. Fail clearly if safety cannot be established.
+   is not proof of quiescence. Prefer an Application-scoped barrier over a
+   controller-wide pause: disable that app's auto-sync together with an
+   `argocd.argoproj.io/refresh` request, wait until Argo removes the refresh
+   annotation (a refresh observed the change), then until no operation runs.
+   Ask the administrator before pausing anything; block if no terminal and
+   no explicit approval variable. Fail clearly if safety cannot be established.
    If an Application must never publish without this gate, declare its exact
    hook path in `bootstrapper.talos.dev/required-before-argo-hook`. The runner
    blocks if the required hook is missing/excluded while that app is included.

@@ -12,10 +12,12 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 
 SYNC = "argocd.argoproj.io/sync-options"
 TRACK = "argocd.argoproj.io/tracking-id"
-SKIP = "argocd.argoproj.io/skip-reconcile"
+REFRESH = "argocd.argoproj.io/refresh"
+POLL_SECONDS = float(os.environ.get("GATEWAY_API_MIGRATION_POLL_SECONDS", "2"))
 GROUP = "gateway.networking.k8s.io"
 PIN = (1, 6, 3)
 LEGACY_OWNERS = {"traefik", "traefik_traefik"}  # Argo apps-in-any-namespace InstanceName.
@@ -179,44 +181,82 @@ def compatibility(crds):
             fail(f"{name}: live stored/served versions {sorted(stored | served)} incompatible with target {sorted(versions)}; migrate storage/clients first")
 
 
-def quiesce(app, legacy):
-    # A live annotation plus a sleep cannot prove that the old controller's
-    # informer has observed it, or that a queued self-heal is not still running.
-    # Hard gate: administrators stop ALL application controllers and wait for
-    # their pods to disappear. We never scale anything automatically.
-    namespace = os.environ.get("ARGOCD_NAMESPACE", "argocd")
-    config = get("configmap", "argocd-cm", "-n", namespace)
-    data = config.get("data", {})
+def check_tracking(legacy):
+    data = get("configmap", "argocd-cm", "-n", os.environ.get("ARGOCD_NAMESPACE", "argocd")).get("data", {})
     if (data.get("application.resourceTrackingMethod") not in ("annotation", "annotation+label")
             or data.get("application.instanceLabelKey", "app.kubernetes.io/instance") != "app.kubernetes.io/instance"):
         fail("Migration requires standard annotation or annotation+label Argo tracking; review custom tracking manually")
     installation = data.get("installationID", "")
     if any(crd["metadata"].get("annotations", {}).get("argocd.argoproj.io/installation-id", "") != installation for crd in legacy):
         fail("Gateway CRD Argo installation ID does not match this controller; review ownership manually")
-    selector = "app.kubernetes.io/name=argocd-application-controller"
-    controllers = get("deployments,statefulsets", "-n", namespace, "-l", selector)["items"]
-    if not controllers:
-        fail("No standard Argo application-controller workloads found; cannot prove quiescence")
-    for controller in controllers:
-        if controller["spec"].get("replicas", 1) != 0:
-            fail("Legacy migration requires Argo application controllers scaled to 0 and ALL their pods gone before retry. No publication occurred.")
-        images = [x["image"] for x in controller["spec"]["template"]["spec"]["containers"]]
-        releases = [re.search(r"(?:^|/)argocd:v?(\d+)\.(\d+)\.(\d+)(?:@sha256:[a-f0-9]+)?$", image) for image in images]
-        if not any(m and tuple(map(int, m.groups())) >= (2, 7, 0) for m in releases):
-            fail("Cannot verify Argo >=2.7 skip-reconcile support from controller image; review manually")
-    pods = get("pods", "-n", namespace, "-l", selector)["items"]
-    if pods:
-        fail("Argo application-controller pods still exist (including terminating pods); wait for removal")
-    if active(app):
-        fail("Traefik has an active/pending sync. Finish/terminate it before stopping controllers, then retry")
+
+
+def confirm(legacy):
+    if os.environ.get("GATEWAY_API_MIGRATION_APPROVED") == "true":
+        print("[gateway-api] Approved via GATEWAY_API_MIGRATION_APPROVED=true")
+        return
+    try:
+        tty = open("/dev/tty", "r+")
+    except OSError:
+        fail("Administrator approval required but no terminal is available; rerun interactively "
+             "or set GATEWAY_API_MIGRATION_APPROVED=true. Nothing was changed.")
+    with tty:
+        tty.write(f"\n[gateway-api] {len(legacy)} Gateway API CRD(s) are managed by the Traefik Application.\n"
+                  "This migration will:\n"
+                  "  1. Disable auto-sync for the Traefik Application only (other apps keep syncing).\n"
+                  "  2. Wait for ArgoCD to acknowledge that and for any Traefik sync to finish.\n"
+                  "  3. Protect those CRDs against prune/delete (Prune=false,Delete=false).\n"
+                  "Traefik auto-sync is re-enabled when Apply Overlay applies the new Traefik Application.\n"
+                  "Continue? [y/N] ")
+        tty.flush()
+        if tty.readline().strip().lower() not in ("y", "yes"):
+            fail("Declined by administrator. Nothing was changed.")
+
+
+def wait_for(app, timeout):
+    # The refresh annotation is removed only by a controller refresh that read
+    # this exact object (spec with auto-sync disabled). The controller's work
+    # queue never processes one Application concurrently, so any older refresh
+    # that may still have started an auto-sync has completed by then; such a
+    # sync is visible as .operation, which we wait out next.
+    metadata = app["metadata"]
+    deadline = time.monotonic() + timeout
+    while True:
+        live = get("applications.argoproj.io", metadata["name"], "-n", metadata["namespace"])
+        automated = (live["spec"].get("syncPolicy") or {}).get("automated")
+        if automated is not None and automated.get("enabled") is not False:
+            fail("Traefik auto-sync was re-enabled by someone else during the handover; review and rerun")
+        acknowledged = REFRESH not in live["metadata"].get("annotations", {})
+        if acknowledged and not active(live):
+            return
+        if time.monotonic() >= deadline:
+            fail("Timed out: " + ("ArgoCD did not process the Traefik refresh (is the application controller running?)"
+                                  if not acknowledged else
+                                  "a Traefik sync is still running. Let it finish, or terminate it with "
+                                  "'argocd app terminate-op traefik -N traefik', then rerun"))
+        time.sleep(POLL_SECONDS)
+
+
+def pause_autosync(app, api):
     metadata = app["metadata"]
     if metadata.get("ownerReferences") or metadata.get("annotations", {}).get(TRACK):
-        fail("Traefik Application has a parent manager; quiesce/review parent ownership before handover")
-    if metadata.get("annotations", {}).get(SKIP) != "true":
-        annotate("applications.argoproj.io", app, {SKIP: "true"}, metadata["namespace"])
-    live = get("applications.argoproj.io", metadata["name"], "-n", metadata["namespace"])
-    if live["metadata"].get("annotations", {}).get(SKIP) != "true" or active(live):
-        fail("Traefik pause could not be verified")
+        fail("Traefik Application has a parent manager that would revert disabling auto-sync; review before handover")
+    automated_schema = next(
+        (v for v in api["spec"]["versions"] if v["name"] == "v1alpha1"), {}).get("schema", {}).get(
+        "openAPIV3Schema", {}).get("properties", {}).get("spec", {}).get("properties", {}).get(
+        "syncPolicy", {}).get("properties", {}).get("automated", {}).get("properties", {})
+    if "enabled" not in automated_schema:
+        fail("Installed ArgoCD does not support spec.syncPolicy.automated.enabled (requires ArgoCD 3.x); upgrade ArgoCD first")
+    annotations = dict(metadata.get("annotations", {}))
+    annotations[REFRESH] = "normal"
+    patch = [{"op": "test", "path": "/metadata/resourceVersion", "value": metadata["resourceVersion"]},
+             {"op": "add", "path": "/metadata/annotations", "value": annotations}]
+    if (app["spec"].get("syncPolicy") or {}).get("automated") is not None:
+        patch.append({"op": "add", "path": "/spec/syncPolicy/automated/enabled", "value": False})
+    kube("patch", "applications.argoproj.io", metadata["name"], "-n", metadata["namespace"],
+         "--type=json", "-p", json.dumps(patch))
+    print("[gateway-api] Traefik auto-sync disabled; waiting for ArgoCD to acknowledge and for any sync to finish...")
+    wait_for(app, int(os.environ.get("GATEWAY_API_MIGRATION_TIMEOUT_SECONDS", "900")))
 
 
 def main():
@@ -274,11 +314,30 @@ def main():
         print("[gateway-api] SKIP: no legacy Traefik-owned Gateway CRDs" +
               (" (reachable fresh bootstrap; Argo Application API absent)" if not api else ""))
         return
-    quiesce(app, legacy)
-    for crd in sorted(legacy, key=lambda x: x["metadata"]["name"]):
+    check_tracking(legacy)
+    for crd in legacy:
+        if any(x.startswith(("Prune=", "Delete=")) and x not in ("Prune=false", "Delete=false") for x in options(crd)):
+            fail(f"{crd['metadata']['name']}: conflicting Prune/Delete sync options; resolve explicitly")
+    if all(protected(x) for x in legacy) and chart_version(app) == target_version:
+        print("[gateway-api] Handover in progress: CRDs protected and live Traefik already uses the target chart; "
+              "waiting for gateway-api to adopt them. No changes.")
+        return
+    if chart_version(app) != target_version:
+        if ((target_app["spec"].get("syncPolicy") or {}).get("automated") or {}).get("enabled") is not True:
+            fail("Rendered Traefik Application must set spec.syncPolicy.automated.enabled: true so Apply Overlay "
+                 "re-enables the auto-sync this migration disables")
+        # The live (old) chart still declares these CRDs; its self-heal could
+        # revert or prune them, so Traefik must stop syncing first. Approval is
+        # only asked once: reruns (e.g. Apply Overlay's push gate) find it disabled.
+        automated = (app["spec"].get("syncPolicy") or {}).get("automated")
+        if automated is not None and automated.get("enabled") is not False:
+            confirm(legacy)
+        pause_autosync(app, api)
+    for name in sorted(x["metadata"]["name"] for x in legacy):
+        crd = get("crd", name)  # Re-read: the wait above may have taken a while.
         values = options(crd)
         if any(x.startswith(("Prune=", "Delete=")) and x not in ("Prune=false", "Delete=false") for x in values):
-            fail(f"{crd['metadata']['name']}: conflicting Prune/Delete sync options; resolve explicitly")
+            fail(f"{name}: conflicting Prune/Delete sync options; resolve explicitly")
         for required in ("Prune=false", "Delete=false"):
             if required not in values:
                 values.append(required)
@@ -289,8 +348,10 @@ def main():
         live = get("crd", original["metadata"]["name"])
         if not protected(live) or owner(live) != owner(original):
             fail(f"{original['metadata']['name']}: live protection/ownership verification failed")
-    print("[gateway-api] PROTECTED: legacy CRDs verified. Controllers remain stopped; Traefik remains skip-reconcile=true.")
-    print("[gateway-api] Next: publish/apply new Applications, resume controllers, sync gateway-api and verify tracking adoption BEFORE unpausing Traefik. See base/gatewayApi/README.md.")
+    print("[gateway-api] PROTECTED: legacy Gateway API CRDs verified (Prune=false,Delete=false).")
+    if chart_version(app) != target_version:
+        print("[gateway-api] Traefik auto-sync stays DISABLED until 'Apply Overlay' applies the new Traefik "
+              "Application, which re-enables it together with the chart upgrade. 'Render and Push' alone does not.")
 
 
 try:

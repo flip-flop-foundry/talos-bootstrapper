@@ -20,6 +20,7 @@ spec:
     server: https://kubernetes.default.svc
   syncPolicy:
     automated:
+      enabled: true  # Explicit so 'kubectl apply' re-enables it after the Gateway API migration hook disables it.
       prune: true
       selfHeal: true
     syncOptions:

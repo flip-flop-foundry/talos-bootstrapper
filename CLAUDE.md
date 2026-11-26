@@ -112,9 +112,10 @@ Overlay replacement is trusted code and must preserve equivalent safety checks.
 `beforeTalos` is reserved, **not wired**; do not modify Talos entrypoints.
 Authoring workflow: `.github/skills/create-deployment-hook/SKILL.md`.
 Gateway API CRDs are separately managed by `gateway-api` (standard v1.6.3);
-Traefik defaults to chart 42.3.1 / app v3.7.17. The legacy handover requires
-quiesced Argo application controllers and live protection/adoption verification;
-see `base/gatewayApi/README.md`. Do not disable the gate or downgrade experimental
+Traefik defaults to chart 42.3.1 / app v3.7.17. The legacy handover asks for
+admin approval, disables auto-sync on the Traefik Application only (waiting for
+Argo's refresh acknowledgment and any running sync), and protects the CRDs before
+publication; Apply Overlay re-enables it. See `base/gatewayApi/README.md`. Do not disable the gate or downgrade experimental
 installations to make an upgrade proceed.
 
 - ArgoCD Application: `<component>ArgoApp.yaml`

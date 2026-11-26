@@ -13,109 +13,81 @@ files are deliberately not changed by this source update. Standard is the
 intended bundle for dkk8s1; experimental, unknown-channel, newer-bundle, or
 incompatible stored/served-version installations **block**, not downgrade.
 
-## Why a maintenance gate is necessary
+## How the legacy handover works
 
-Chart 39.0.8's `traefik/crds/gateway-standard-install.yaml` lacks Argo sync-option
-annotations. The old Application has SSA, automated prune and self-heal.
-SSA retains fields owned exclusively by another field manager, but this is not
-proof that Argo's comparison or client-side-apply migration will ignore the added
-field: manager ownership, desired/live comparison and in-flight syncs matter.
-An annotation plus a delay is not an informer/operation barrier.
+Chart 39.0.8 bundles these CRDs; chart 42.3.1 does not. Upgrading Traefik with
+automated prune would therefore **delete** the CRDs (and every Gateway/route).
+Before any publication, the `beforeArgo` hook
+`deploymentHooks/beforeArgo/20-gateway-api-migration.sh` runs automatically from
+**Render and Push to Gitea** and **Apply Overlay**:
 
-The migration therefore requires **all Argo application-controller workloads in
-the configured Argo namespace at zero replicas, and no controller pods left**.
-It verifies no Traefik sync is active/pending, and refuses a parent-managed
-Traefik Application or custom/unverifiable tracking/controller versions.
-It then sets Traefik `skip-reconcile=true` (supported since Argo 2.7), preserves
-all existing CRD annotation options, adds `Prune=false,Delete=false`, and reads
-every live CRD back before publication. CAS/write/query/postcondition failure
-blocks publication. Controllers are **not** automatically scaled or resumed.
+1. **Relevance first.** If no Gateway CRD is tracked by the Traefik Application,
+   it prints `SKIP` and changes nothing (also on fresh bootstraps).
+2. **Compatibility.** Experimental, unknown, newer or storage-incompatible
+   installations block — never auto-downgraded.
+3. **Approval.** The administrator is asked to confirm in the terminal.
+   Non-interactive runs block unless `GATEWAY_API_MIGRATION_APPROVED=true`.
+4. **Traefik-only pause.** Sets `spec.syncPolicy.automated.enabled=false` on the
+   Traefik Application **only** (ArgoCD 3.x) together with a refresh request.
+   Other Applications keep syncing. The hook waits until ArgoCD removes the
+   refresh annotation — proof that a controller refresh observed the disabled
+   auto-sync, and that any earlier in-flight Traefik refresh has finished —
+   then waits for any running Traefik sync to complete
+   (`GATEWAY_API_MIGRATION_TIMEOUT_SECONDS`, default 900).
+5. **Protection.** Adds `Prune=false,Delete=false` to each legacy CRD's
+   `argocd.argoproj.io/sync-options` (existing options preserved), and reads
+   every CRD back before publication is allowed. Nothing is deleted and
+   ownership is never rewritten.
 
-Both `traefik` and namespace-qualified `traefik_traefik` tracking identities are
-recognized, with self-referencing CRD tracking IDs preferred over labels.
-Live Traefik Application status must agree with legacy ownership. Fresh bootstrap
-is a **reachable** API with an absent Applications CRD; an unreachable/Forbidden/
-TLS-failing API always blocks. No legacy ownership means an explicit migration
-skip, but an included new Gateway app still gets compatibility checks.
+**Apply Overlay** then applies the rendered Traefik Application. It explicitly
+declares `automated.enabled: true`, so the chart upgrade and auto-sync
+re-enablement land atomically. The new chart no longer declares the CRDs, and
+resource-level `Prune=false` stops it pruning them. The `gateway-api`
+Application adopts them on its next sync (Argo rewrites the tracking ID), and
+its own Kustomization keeps them protected permanently.
 
-## Exact administrator sequence (dkk8s1)
+Why not a timer or a skip-reconcile annotation: neither proves that an
+already-running reconcile will not start one more old-chart sync. The refresh
+acknowledgment does, because ArgoCD never processes the same Application
+concurrently and the refresh annotation is only removed by a refresh that read
+the patched object.
 
-Implementation/testing does not run these live commands. Use a maintenance
-window; don't allow competing manual syncs, parent reconcilers, Git publishes,
-or Helm upgrades during handover.
+## Administrator sequence (dkk8s1)
 
-1. Review/merge both source commits (tooling and shared base). Preserve existing
-   local environment/Talos edits. In
-   `/workspaces/talos-bootstrapper-data/environments/dkk8s1/dkk8s1.env`, deliberately
-   set `TRAEFIK_HELM_VERSION="42.3.1"`. Do not disable the hook. Ensure
-   `gatewayApi`, its Application/bundle resources, and the migration script are
-   not in `EXCLUDED_BASE`. No experimental bundle is selected automatically.
-2. Select the dkk8s1 Kubernetes context using the existing environment context
-   task. Confirm the kubeconfig cluster matches `TALOS_CLUSTER_NAME` and server
-   matches `https://${TALOS_CLUSTER_ENDPOINT}:6443`. A deliberately different
-   endpoint requires `DEPLOYMENT_HOOK_KUBE_SERVER` in the trusted env.
-3. Render (no live mutations):
-   ```
-   /workspaces/Talos/.vscode/tasks/render-overlay.sh /workspaces/talos-bootstrapper-data/environments/dkk8s1/dkk8s1.env
-   ```
-   Inspect `_rendered/gatewayApi/gatewayApiArgoApp.yaml`, its templates, and
-   `_rendered/traefik/traefikArgoApp.yaml`. Inspect/snapshot the live CRD metadata,
-   Check any environment Traefik values overlay too: chart 42 moves
-   `service.type` to `service.spec.type`; do not carry the removed key forward.
-   stored versions, Traefik Application and controller replica counts in your
-   change record. Finish or terminate any active Traefik sync **before pausing**.
-4. Record original counts; stop all standard application controllers:
-   ```
-   kubectl -n argocd get deployment,statefulset -l app.kubernetes.io/name=argocd-application-controller
-   kubectl -n argocd scale deployment,statefulset -l app.kubernetes.io/name=argocd-application-controller --replicas=0
-   kubectl -n argocd get pods -l app.kubernetes.io/name=argocd-application-controller
-   ```
-   Wait until the last command lists **no pods**, including terminating ones.
-   If a nonstandard/sharded controller or parent manager exists, stop and review
-   it; the built-in migration does not claim to handle unknown installations.
-5. Run **Render and Push to Gitea**, or:
-   ```
-   /workspaces/Talos/.vscode/tasks/push-to-gitea.sh dkk8s1
-   ```
-   The wired preflight must report `PROTECTED`; errors abort the push.
-   Do not use full Apply Overlay for this handover if its Helm upgrade would
-   resume application controllers before final publication.
-6. While controllers are still stopped, install/update the two Applications:
-   ```
-   kubectl apply -f /workspaces/talos-bootstrapper-data/environments/dkk8s1/_rendered/gatewayApi/gatewayApiArgoApp.yaml
-   kubectl apply -f /workspaces/talos-bootstrapper-data/environments/dkk8s1/_rendered/traefik/traefikArgoApp.yaml
-   kubectl -n traefik get application traefik -o yaml
-   ```
-   Verify the live Traefik chart is 42.3.1 and `skip-reconcile: "true"` remains.
-   Direct kubectl apply preserves the out-of-band pause annotation; if a parent
-   manager has appeared, stop and review rather than relying on preservation.
-7. Restore each recorded controller replica count (not a guessed default).
-   Keep Traefik paused. Let `gateway-api` sync, or sync it explicitly in Argo.
-   Wait for successful sync/healthy resources and verify **all ten Gateway CRDs**
-   have self-referencing tracking IDs:
-   `gateway-api:apiextensions.k8s.io/CustomResourceDefinition:/<crd-name>`,
-   plus `Prune=false,Delete=false`. Check the upstream safe-upgrades admission
-   policy/binding are present. Never manually change tracking to simulate adoption.
-8. Only after adoption, resume Traefik:
-   ```
-   kubectl -n traefik annotate application traefik argocd.argoproj.io/skip-reconcile-
-   ```
-   Sync/verify Traefik 42.3.1 / v3.7.17 and the Gateway API app. Old Traefik must
-   no longer track Gateway CRDs. Protected CRDs intentionally are not pruned when
-   an app/resource is excluded or deleted; this is safety, not automatic cleanup.
+Use a quiet window: avoid manual Traefik syncs or other Git publishes meanwhile.
 
-   Both Gateway and Traefik Applications declare a required-beforeArgo-hook
-   annotation. Removing/excluding the migration hook while publishing these apps
-   blocks before any cluster mutation/publication. A deliberately replaced hook is
-   trusted operator code and must preserve this migration's protection, compatibility,
-   quiescence and ownership checks. Unsupported/custom tracking or status-listed
-   CRDs with ambiguous ownership block **before** any “no legacy” skip.
+1. Merge both source commits. In `dkk8s1.env` set `TRAEFIK_HELM_VERSION="42.3.1"`.
+   Keep `gatewayApi` and the migration hook out of `EXCLUDED_BASE`. Check any
+   environment Traefik values overlay: chart 42 moves `service.type` to
+   `service.spec.type`.
+2. Select the dkk8s1 Kubernetes context (the runner validates cluster name and
+   `https://${TALOS_CLUSTER_ENDPOINT}:6443`; use `DEPLOYMENT_HOOK_KUBE_SERVER`
+   for a deliberately different endpoint).
+3. Optional preview: **Render Overlay**, then inspect
+   `_rendered/gatewayApi/` and `_rendered/traefik/traefikArgoApp.yaml`.
+4. Run **Apply Overlay** and answer `y` to the migration prompt. Expect
+   `PROTECTED` before publication. Running only **Render and Push** protects
+   the CRDs but leaves Traefik auto-sync disabled until Apply Overlay runs.
+5. Verify:
+   ```
+   kubectl -n traefik get application traefik -o jsonpath='{.spec.syncPolicy.automated.enabled}{"\n"}'
+   kubectl -n argocd get application gateway-api
+   kubectl get crd -o custom-columns='NAME:.metadata.name,OWNER:.metadata.annotations.argocd\.argoproj\.io/tracking-id,VERSION:.metadata.annotations.gateway\.networking\.k8s\.io/bundle-version' | grep gateway.networking
+   ```
+   Expect `true`, a Synced/Healthy `gateway-api`, and all ten CRDs owned by
+   `gateway-api:` at `v1.6.3`. Check the safe-upgrades admission policy and
+   binding exist. Rerunning the hook afterwards reports `SKIP`.
 
-If a write or publication fails, leave controllers stopped and Traefik paused,
-fix the cause, and rerun. A partial annotation update is idempotent. If abandoning
-the upgrade, **do not** resume the old chart after the new admission policy or
-Gateway app has synced; review ownership/version compatibility first. There is
-no automatic rollback of CRD schemas, deletion, pause or annotations.
+Recovery: every step is idempotent — fix the reported cause and rerun.
+If the hook fails after disabling auto-sync, Traefik stays paused (safe);
+rerunning continues the handover. To abandon it, re-enable auto-sync by
+re-applying the **old** rendered Traefik Application only if `gateway-api` has
+not synced yet; otherwise review ownership and versions first. Protected CRDs
+are intentionally never pruned or deleted automatically.
+
+Both Gateway and Traefik Applications declare a required-beforeArgo-hook
+annotation: excluding the hook while publishing them blocks before any change.
+A replacement hook is trusted code and must keep equivalent checks.
 
 ## Pinned public provenance
 
@@ -147,5 +119,5 @@ Chart audit sources:
 * https://github.com/traefik/traefik-helm-chart/tree/v42.3.1/traefik/crds
 * https://github.com/traefik/traefik-helm-chart/blob/v42.3.1/traefik/Chart.yaml
 * https://argo-cd.readthedocs.io/en/stable/user-guide/sync-options/
-* https://argo-cd.readthedocs.io/en/stable/user-guide/skip_reconcile/
+* https://argo-cd.readthedocs.io/en/stable/user-guide/auto_sync/
 * https://argo-cd.readthedocs.io/en/stable/user-guide/resource_tracking/
